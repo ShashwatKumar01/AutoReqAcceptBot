@@ -26,6 +26,8 @@ class BroadcastWorker:
         broadcast_repo,
         telegram_service,
         rate_limiter,
+        user_repo=None,
+        chat_repo=None,
         batch_size: int = 200,
         poll_interval: int = 10
     ):
@@ -33,6 +35,8 @@ class BroadcastWorker:
         self.broadcast_repo = broadcast_repo
         self.telegram_service = telegram_service
         self.rate_limiter = rate_limiter
+        self.user_repo = user_repo
+        self.chat_repo = chat_repo
         self.batch_size = batch_size
         self.poll_interval = poll_interval
         self.running = False
@@ -65,62 +69,146 @@ class BroadcastWorker:
         if not current_job or current_job.get('status') != 'running':
             return
 
-        recipients = await self.broadcast_repo.get_pending_recipients(job_id, limit=self.batch_size)
-        if not recipients:
-            await self.broadcast_repo.mark_job_completed(job_id)
+        # If recipients aren't pre-populated, generate them from `users` collection
+        # for this job's target. They're cached on the job document so we don't
+        # re-query every batch.
+        if not job.get('_recipients_resolved'):
+            recipients = await self._resolve_recipients(job)
+            if not recipients:
+                await self.broadcast_repo.update_job_status(
+                    job_id, 'completed', {'completed_at': __import__('datetime').datetime.utcnow()}
+                )
+                self.logger.info('BROADCAST_JOB_NO_RECIPIENTS', job_id=job_id)
+                return
+            await self.broadcast_repo.set_job_total_recipients(job_id, len(recipients))
+            # Stash on the job dict in-memory for this loop iteration only
+            job['_recipients'] = recipients
+            job['_recipients_resolved'] = True
+            job['_cursor'] = 0
+
+        recipients = job.get('_recipients', [])
+        cursor = job.get('_cursor', 0)
+        batch = recipients[cursor:cursor + self.batch_size]
+        if not batch:
+            await self.broadcast_repo.update_job_status(
+                job_id, 'completed', {'completed_at': __import__('datetime').datetime.utcnow()}
+            )
             self.logger.info('BROADCAST_JOB_COMPLETED', job_id=job_id)
             return
 
         success_count = 0
         failure_count = 0
 
-        for recipient in recipients:
+        for user_id in batch:
             if not self.running:
                 break
-            
-            # Re-check status occasionally or rely on batch size being small enough
-            
-            success = await self._send_to_recipient(job, recipient)
+
+            success = await self._send_to_recipient(job, {'user_id': user_id})
             if success:
                 success_count += 1
             else:
                 failure_count += 1
-                
-            await self.broadcast_repo.update_recipient_status(
-                job_id=job_id, 
-                user_id=recipient['user_id'], 
-                status='sent' if success else 'failed'
-            )
-            
-            # Rate limiting sleep between messages
-            await asyncio.sleep(0.04) # 40ms minimum sleep
 
-        await self.broadcast_repo.update_job_progress(job_id, success_count, failure_count)
+            # Rate limiting sleep between messages
+            await asyncio.sleep(0.04)  # 40ms minimum sleep
+
+        job['_cursor'] = cursor + len(batch)
+        await self.broadcast_repo.update_job_progress(job_id, len(batch), success_count, failure_count)
         self.logger.info('BROADCAST_BATCH_PROCESSED', job_id=job_id, success=success_count, failure=failure_count)
+
+    async def _resolve_recipients(self, job: dict) -> list[int]:
+        """Compute the list of user IDs to send to, based on job.target.
+        Reads from `users` collection (not join_requests) since that's where
+        the bot has been recording actual interactions.
+        """
+        if not self.user_repo or not self.chat_repo:
+            self.logger.error('BROADCAST_NO_REPO', job_id=job.get('_id'))
+            return []
+
+        target = job.get('target')
+        target_id = job.get('target_id')
+        owner_id = job.get('owner_id')
+
+        if target == 'chat' and target_id:
+            cursor = self.user_repo.collection.aggregate([
+                {"$unwind": "$chat_ids"},
+                {"$match": {"chat_ids": int(target_id)}},
+                {"$group": {"_id": "$telegram_id"}},
+            ])
+            docs = await cursor.to_list(length=None)
+            return [d['_id'] for d in docs]
+
+        if target == 'all':
+            chats = await self.chat_repo.get_by_admin(int(owner_id)) if owner_id else []
+            chat_ids = [c['chat_id'] for c in chats]
+            if not chat_ids:
+                return []
+            cursor = self.user_repo.collection.aggregate([
+                {"$unwind": "$chat_ids"},
+                {"$match": {"chat_ids": {"$in": chat_ids}}},
+                {"$group": {"_id": "$telegram_id"}},
+            ])
+            docs = await cursor.to_list(length=None)
+            return [d['_id'] for d in docs]
+
+        if target == 'all_users' or target == 'master':
+            # Master broadcast — every user in DB
+            cursor = self.user_repo.collection.find({}, {"telegram_id": 1, "_id": 0})
+            docs = await cursor.to_list(length=None)
+            return [d['telegram_id'] for d in docs]
+
+        return []
     
     async def _send_to_recipient(self, job: dict, recipient: dict) -> bool:
         """Send broadcast message to one recipient."""
         user_id = recipient['user_id']
         payload = job.get('payload', {})
         max_retries = 3
-        
+
         for attempt in range(max_retries):
             try:
                 # Wait based on global rate limiter
                 await self.rate_limiter.acquire()
-                
-                kwargs = await self._build_message_kwargs(payload)
-                kwargs['chat_id'] = user_id
-                
-                if payload.get('type') == 'photo':
-                    await self.telegram_service.bot.send_photo(**kwargs)
-                elif payload.get('type') == 'video':
-                    await self.telegram_service.bot.send_video(**kwargs)
+
+                bot = self.telegram_service.bot
+                msg_type = payload.get('type', 'text')
+                text = payload.get('text')
+                caption = payload.get('caption')
+                parse_mode = payload.get('parse_mode', 'HTML')
+                reply_markup = payload.get('reply_markup')
+
+                if msg_type == 'photo':
+                    await bot.send_photo(
+                        chat_id=user_id, photo=payload['photo'],
+                        caption=caption, parse_mode=parse_mode,
+                        reply_markup=reply_markup,
+                    )
+                elif msg_type == 'video':
+                    await bot.send_video(
+                        chat_id=user_id, video=payload['video'],
+                        caption=caption, parse_mode=parse_mode,
+                        reply_markup=reply_markup,
+                    )
+                elif msg_type == 'document':
+                    await bot.send_document(
+                        chat_id=user_id, document=payload['document'],
+                        caption=caption, parse_mode=parse_mode,
+                        reply_markup=reply_markup,
+                    )
+                elif msg_type == 'animation':
+                    await bot.send_animation(
+                        chat_id=user_id, animation=payload['animation'],
+                        caption=caption, parse_mode=parse_mode,
+                        reply_markup=reply_markup,
+                    )
                 else:
-                    await self.telegram_service.bot.send_message(**kwargs)
-                
+                    await bot.send_message(
+                        chat_id=user_id, text=text or "(empty)",
+                        parse_mode=parse_mode, reply_markup=reply_markup,
+                    )
+
                 return True
-                
+
             except TelegramRetryAfter as e:
                 sleep_time = e.retry_after + random.uniform(0.5, 1.5)
                 self.logger.warning('RATE_LIMIT_RETRY_AFTER', user_id=user_id, sleep_time=sleep_time)
@@ -137,25 +225,8 @@ class BroadcastWorker:
             except Exception as e:
                 self.logger.error('UNKNOWN_BROADCAST_ERROR', user_id=user_id, error=str(e), exc_info=True)
                 return False
-                
+
         return False
-    
-    async def _build_message_kwargs(self, payload: dict) -> dict:
-        """Build kwargs for bot.send_message or send_photo etc."""
-        kwargs = {}
-        if 'text' in payload:
-            kwargs['text'] = payload['text']
-        if 'caption' in payload:
-            kwargs['caption'] = payload['caption']
-        if 'photo' in payload:
-            kwargs['photo'] = payload['photo']
-        if 'video' in payload:
-            kwargs['video'] = payload['video']
-        if 'reply_markup' in payload:
-            kwargs['reply_markup'] = payload['reply_markup']
-        if 'parse_mode' in payload:
-            kwargs['parse_mode'] = payload['parse_mode']
-        return kwargs
     
     async def stop(self) -> None:
         self.running = False

@@ -10,12 +10,18 @@ class UserRepository:
     async def upsert(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
         telegram_id = user_data['telegram_id']
         now = datetime.now(timezone.utc)
-        
+
+        # If a chat_id is provided, also track it on the user so
+        # broadcast can target users by chat.
+        chat_id = user_data.pop('chat_id', None)
+
         update_doc = {
             "$set": {k: v for k, v in user_data.items() if k != 'telegram_id'},
             "$setOnInsert": {"created_at": now}
         }
-        
+        if chat_id is not None:
+            update_doc["$addToSet"] = {"chat_ids": int(chat_id)}
+
         return await self.collection.find_one_and_update(
             {"telegram_id": telegram_id},
             update_doc,

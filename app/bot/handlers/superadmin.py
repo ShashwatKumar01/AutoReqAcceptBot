@@ -2,10 +2,13 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
 from datetime import datetime, timezone
+import uuid
 
 from ..filters.is_superadmin import IsSuperAdmin
 from ..keyboards.superadmin_menu import superadmin_main_keyboard, superadmin_stats_keyboard
+from ..keyboards.broadcast_menu import broadcast_confirm_keyboard, broadcast_control_keyboard
 
 router = Router()
 
@@ -21,6 +24,12 @@ def admin_cb_filter(callback: CallbackQuery, is_super_admin: bool = False, **kwa
 
 router.message.filter(admin_filter)
 router.callback_query.filter(admin_cb_filter)
+
+
+class MasterBroadcastStates(StatesGroup):
+    composing = State()
+    confirming = State()
+
 
 @router.message(Command('admin'))
 async def admin_panel(message: Message):
@@ -55,8 +64,88 @@ async def system_stats(message: Message):
 
 @router.message(Command('master_broadcast'))
 async def master_broadcast_command(message: Message, state: FSMContext):
-    """Super admin master broadcast."""
-    await message.answer("Master broadcast feature. Please use regular broadcast interface for now, or build this out to use 'all users' target.")
+    """Super admin master broadcast — targets every user in the system."""
+    await state.set_state(MasterBroadcastStates.composing)
+    await message.answer(
+        "📢 <b>Master Broadcast</b>\n\n"
+        "This goes to <b>every</b> user in the database.\n\n"
+        "Send the message you want to broadcast (text, photo, video, document, etc.):"
+    )
+
+
+@router.message(MasterBroadcastStates.composing)
+async def master_broadcast_compose(message: Message, state: FSMContext, user_repo, broadcast_repo):
+    payload: dict = {"parse_mode": "HTML"}
+    if message.text:
+        payload["type"] = "text"
+        payload["text"] = message.html_text or message.text
+    elif message.photo:
+        payload["type"] = "photo"
+        payload["photo"] = message.photo[-1].file_id
+        if message.caption:
+            payload["caption"] = message.html_text or message.caption
+    elif message.video:
+        payload["type"] = "video"
+        payload["video"] = message.video.file_id
+        if message.caption:
+            payload["caption"] = message.html_text or message.caption
+    elif message.document:
+        payload["type"] = "document"
+        payload["document"] = message.document.file_id
+        if message.caption:
+            payload["caption"] = message.html_text or message.caption
+    elif message.animation:
+        payload["type"] = "animation"
+        payload["animation"] = message.animation.file_id
+        if message.caption:
+            payload["caption"] = message.html_text or message.caption
+    else:
+        return await message.answer("Unsupported message type. Send text, photo, video, GIF, or document.")
+
+    estimate = await user_repo.count()
+    if estimate == 0:
+        return await message.answer("❌ No users in the database yet.")
+
+    job_id = str(uuid.uuid4())
+    await state.update_data(payload=payload, estimate=estimate, job_id=job_id)
+    await state.set_state(MasterBroadcastStates.confirming)
+    await message.answer(
+        f"📊 <b>Master Broadcast Summary</b>\n\n"
+        f"Total users in system: <b>{estimate}</b>\n\n"
+        "Are you sure you want to send to ALL users?",
+        reply_markup=broadcast_confirm_keyboard(job_id),
+    )
+
+
+@router.callback_query(MasterBroadcastStates.confirming, F.data.startswith("broadcast:confirm:"))
+async def master_broadcast_confirm(callback: CallbackQuery, state: FSMContext, broadcast_repo):
+    data = await state.get_data()
+    job_id = data["job_id"]
+    payload = data.get("payload", {})
+    estimate = data.get("estimate", 0)
+
+    await broadcast_repo.create_job({
+        "_id": job_id,
+        "owner_id": callback.from_user.id,
+        "target": "all_users",
+        "target_id": None,
+        "payload": payload,
+        "total_recipients": estimate,
+        "status": "running",
+    })
+    await state.clear()
+    await callback.message.edit_text(
+        "🚀 Master broadcast started!",
+        reply_markup=broadcast_control_keyboard(job_id, "running"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "broadcast:cancel_flow")
+async def master_broadcast_cancel(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text("Master broadcast cancelled.")
+    await callback.answer()
 
 @router.callback_query(F.data == 'menu:admin')
 @router.callback_query(F.data.startswith('admin:'))
@@ -91,6 +180,13 @@ async def admin_callbacks(callback: CallbackQuery, user_repo, chat_repo):
             subaction = callback.data.split(':')[2]
             if subaction == 'refresh':
                 await callback.answer("Refreshed.")
+    elif action == 'master_broadcast':
+        await state.set_state(MasterBroadcastStates.composing)
+        await callback.message.edit_text(
+            "📢 <b>Master Broadcast</b>\n\n"
+            "This goes to <b>every</b> user in the database.\n\n"
+            "Send the message you want to broadcast (text, photo, video, document, etc.):"
+        )
     await callback.answer()
 
 

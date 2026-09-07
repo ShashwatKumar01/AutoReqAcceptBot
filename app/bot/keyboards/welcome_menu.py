@@ -103,9 +103,14 @@ def welcome_buttons_keyboard(
 
     for i, btn in enumerate(buttons):
         label = btn.get("text", f"Button {i+1}")[:20]
-        url_short = btn.get("url", "")[:25]
+        if btn.get("url"):
+            target = btn["url"][:25]
+        elif btn.get("callback_data"):
+            target = "popup:" + btn["callback_data"][7:][:18]
+        else:
+            target = "(no target)"
         b.button(
-            text=f"🗑 [{i+1}] {label} → {url_short}",
+            text=f"🗑 [{i+1}] {label} → {target}",
             callback_data=f"welcome:btn_remove:{chat_id}:{i}",
         )
 

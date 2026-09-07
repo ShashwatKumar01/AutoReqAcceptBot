@@ -133,6 +133,7 @@ async def _approve_and_track(
             "language_code": getattr(from_user, "language_code", None),
             "is_bot": False,
             "is_active": True,
+            "chat_id": chat_id,  # added to chat_ids via $addToSet
         })
         # Increment chat counters
         await chat_repo.increment_counter(chat_id, "total_join_requests")

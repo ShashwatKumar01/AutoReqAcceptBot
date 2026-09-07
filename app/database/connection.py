@@ -33,6 +33,7 @@ class DatabaseManager:
             await self.db.users.create_index("telegram_id", unique=True)
             await self.db.users.create_index("status")
             await self.db.users.create_index("created_at")
+            await self.db.users.create_index("chat_ids")
             
             # chats
             await self.db.chats.create_index("chat_id", unique=True)

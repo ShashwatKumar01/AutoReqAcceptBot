@@ -58,8 +58,10 @@ async def help_handler(message: Message):
         "/mychannels - List your connected chats\n"
         "/settings - Bot settings\n"
         "/welcome - Configure welcome message for a chat\n"
+        "/goodbye - Configure goodbye message for a chat\n"
         "/stats - View statistics\n"
         "/broadcast - Send broadcast message\n"
+        "/plan - View your plan\n"
         "/captcha on|off - Toggle captcha verification (admins only)\n"
     )
     await message.answer(help_text)

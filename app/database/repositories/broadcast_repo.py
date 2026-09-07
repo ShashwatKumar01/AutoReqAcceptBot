@@ -14,7 +14,9 @@ class BroadcastRepository:
             job_data['created_at'] = datetime.now(timezone.utc)
         if 'status' not in job_data:
             job_data['status'] = 'pending'
-            
+        # Normalize: callers may pass job_id or _id — store as _id
+        if '_id' not in job_data and 'job_id' in job_data:
+            job_data['_id'] = job_data.pop('job_id')
         await self.collection.insert_one(job_data)
         return job_data
 
@@ -59,6 +61,11 @@ class BroadcastRepository:
             {"$set": {"total_recipients": total, "updated_at": datetime.now(timezone.utc)}}
         )
         return result.modified_count > 0
+
+    async def mark_job_completed(self, job_id: str) -> bool:
+        return await self.update_job_status(
+            job_id, "completed", {"completed_at": datetime.now(timezone.utc)}
+        )
 
     # --- Recipients ---
     async def add_recipient(self, job_id: str, user_id: int) -> bool:

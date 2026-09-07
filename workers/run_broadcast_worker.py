@@ -68,6 +68,8 @@ async def main():
         broadcast_repo=broadcast_repo,
         telegram_service=telegram_service,
         rate_limiter=rate_limiter,
+        user_repo=user_repo,
+        chat_repo=chat_repo,
         batch_size=settings.broadcast_batch_size,
         poll_interval=10,
     )

@@ -95,9 +95,109 @@ def _build_preview_keyboard(buttons: list) -> InlineKeyboardMarkup | None:
     for btn in buttons:
         row_idx = int(btn.get("row", 1))
         rows.setdefault(row_idx, []).append(
-            InlineKeyboardButton(text=btn["text"][:64], url=btn.get("url"))
+            InlineKeyboardButton(
+                text=str(btn.get("text", ""))[:64],
+                url=btn.get("url"),
+                callback_data=btn.get("callback_data"),
+            )
         )
     return InlineKeyboardMarkup(inline_keyboard=[rows[i] for i in sorted(rows)])
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Button parser — @chelpbot-style format
+# ──────────────────────────────────────────────────────────────────────────────
+
+import re as _re
+
+_POPUP_RE = _re.compile(r"^\s*popup\s*:\s*(.*)$", _re.IGNORECASE)
+
+
+def _parse_single_button(part: str) -> tuple[dict | None, str | None]:
+    """
+    Parse 'Button text - url' or 'Button text - popup:Message'.
+
+    Returns (button_dict, None) on success or (None, error_string) on fail.
+    """
+    part = part.strip()
+    if not part:
+        return None, "Empty segment."
+
+    # Find the LAST " - " separator so button text can contain hyphens
+    sep = " - "
+    idx = part.rfind(sep)
+    if idx == -1:
+        # No separator — treat as a label without a target. Allow it as
+        # a popup:  "Button - popup:" not supplied. Reject instead.
+        return None, f"Missing ' - ' separator in: {part!r}"
+
+    text = part[:idx].strip()
+    target = part[idx + len(sep):].strip()
+
+    if not text:
+        return None, "Button text is empty."
+    if len(text) > 64:
+        text = text[:64]
+    if not target:
+        return None, f"No URL or popup: target after ' - ' in: {part!r}"
+
+    m = _POPUP_RE.match(target)
+    if m:
+        return {
+            "text": text,
+            "url": None,
+            "callback_data": f"popup::{m.group(1).strip()[:200]}",
+        }, None
+
+    if not (target.startswith(("https://", "http://", "tg://", "t.me/"))):
+        return None, (
+            f"Target must start with http(s)://, tg://, t.me/, or popup:. "
+            f"Got: {target!r}"
+        )
+
+    return {"text": text, "url": target, "callback_data": None}, None
+
+
+def parse_button_input(raw: str) -> tuple[list[dict], str]:
+    """
+    Parse @chelpbot-style button text.
+
+      Channel - https://t.me/x
+      Channel - https://t.me/x && Group - https://t.me/y
+      Row 1 - https://t.me/x
+      Row 2 - https://t.me/y
+
+    Each line becomes a row. Within a line, `&&` separates buttons on the
+    same row. Newline → new row.
+    Returns (buttons, error_str_or_empty).
+    """
+    if not raw or not raw.strip():
+        return [], "Empty input."
+
+    raw = raw.replace("\\n", "\n")
+    buttons: list[dict] = []
+    errors: list[str] = []
+
+    for line_no, line in enumerate(raw.splitlines(), 1):
+        line = line.strip()
+        if not line:
+            continue
+        row_idx = line_no  # 1-based; preserves order even on empty skips
+        for part in line.split("&&"):
+            btn, err = _parse_single_button(part)
+            if err:
+                errors.append(f"line {line_no}: {err}")
+                continue
+            btn["row"] = row_idx
+            buttons.append(btn)
+
+    # Compact rows so we have 1..N contiguous, not gaps
+    used_rows = sorted({b["row"] for b in buttons})
+    remap = {old: new for new, old in enumerate(used_rows, 1)}
+    for b in buttons:
+        b["row"] = remap[b["row"]]
+
+    return buttons, ("; ".join(errors) if errors else "")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -399,7 +499,12 @@ async def show_buttons(callback: CallbackQuery, chat_repo):
         f"🔘 <b>Inline Buttons</b> ({count}/10)\n\n"
         + (
             "\n".join(
-                f"{i+1}. <b>{b['text']}</b> → <code>{b.get('url','')}</code>"
+                f"{i+1}. <b>{b['text']}</b> → "
+                + (
+                    f"<code>{b.get('url','')}</code>"
+                    if b.get("url")
+                    else f"<i>popup: {b.get('callback_data','')[7:]} </i>"
+                )
                 for i, b in enumerate(buttons)
             )
             if buttons
@@ -411,6 +516,14 @@ async def show_buttons(callback: CallbackQuery, chat_repo):
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("popup::"))
+async def popup_callback(callback: CallbackQuery):
+    """Show a popup alert from a 'popup:Text' inline button."""
+    text = callback.data[len("popup::"):]
+    # Telegram alert limit: 200 chars
+    await callback.answer(text[:200] if text else "—", show_alert=True)
+
+
 @router.callback_query(F.data.startswith("welcome:btn_add:"))
 async def start_add_button(callback: CallbackQuery, state: FSMContext, chat_repo):
     chat_id = int(callback.data.split(":")[2])
@@ -420,8 +533,15 @@ async def start_add_button(callback: CallbackQuery, state: FSMContext, chat_repo
     await state.set_state(WelcomeStates.waiting_btn_text)
     await state.update_data(chat_id=chat_id)
     await callback.message.answer(
-        "🔘 <b>Add Button — Step 1/2</b>\n\nSend the <b>button text</b> (max 64 chars):\n\n"
-        "Send /cancel to abort."
+        "🔘 <b>Add Buttons</b>\n\n"
+        "Send buttons in this format (one per row, multiple per row with "
+        "<code>&amp;&amp;</code>):\n\n"
+        "<code>Channel - https://t.me/example</code>\n"
+        "<code>Group - https://t.me/x &amp;&amp; Chat - https://t.me/y</code>\n"
+        "<code>Row 1 - https://t.me/a</code>\n"
+        "<code>Row 2 - https://t.me/b</code>\n\n"
+        "Popup button: <code>Info - popup:Message text</code>\n\n"
+        "Up to 10 buttons per chat. Send /cancel to abort."
     )
     await callback.answer()
 
@@ -433,53 +553,37 @@ async def cancel_btn_text(message: Message, state: FSMContext):
 
 
 @router.message(WelcomeStates.waiting_btn_text)
-async def receive_btn_text(message: Message, state: FSMContext):
-    text = (message.text or "").strip()
-    if not text:
-        return await message.answer("Button text cannot be empty. Or /cancel.")
-    if len(text) > 64:
-        return await message.answer("Max 64 characters. Or /cancel.")
-    await state.update_data(btn_text=text)
-    await state.set_state(WelcomeStates.waiting_btn_url)
-    await message.answer(
-        f"🔘 <b>Add Button — Step 2/2</b>\n\nButton text: <b>{text}</b>\n\n"
-        "Now send the <b>URL</b> for this button (must start with https:// or http://):\n\n"
-        "Send /cancel to abort."
-    )
+async def receive_btn_text(message: Message, state: FSMContext, chat_repo):
+    text = message.text or ""
+    if not text.strip():
+        return await message.answer("Please send the button format. Or /cancel.")
 
-
-@router.message(WelcomeStates.waiting_btn_url, Command("cancel"))
-async def cancel_btn_url(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer("Cancelled.")
-
-
-@router.message(WelcomeStates.waiting_btn_url)
-async def receive_btn_url(message: Message, state: FSMContext, chat_repo):
-    url = (message.text or "").strip()
-    if not url.startswith(("https://", "http://", "tg://")):
-        return await message.answer(
-            "Must be a valid URL starting with https://, http://, or tg://\nOr /cancel."
-        )
+    new_buttons, err = parse_button_input(text)
+    if not new_buttons:
+        return await message.answer(f"❌ {err}\n\nOr /cancel.")
 
     data = await state.get_data()
     chat_id = data["chat_id"]
-    btn_text = data["btn_text"]
 
     ws = await _get_welcome_settings(chat_repo, chat_id)
-    buttons = ws["welcome_buttons"]
+    existing = ws["welcome_buttons"]
+    combined = existing + new_buttons
+    if len(combined) > 10:
+        combined = combined[:10]
+        truncated = True
+    else:
+        truncated = False
 
-    # Determine row: put new button on last row or new row
-    last_row = max((b.get("row", 1) for b in buttons), default=0)
-    # If last row already has 3 buttons, start a new row
-    last_row_count = sum(1 for b in buttons if b.get("row") == last_row)
-    row = last_row + 1 if last_row_count >= 3 else max(last_row, 1)
-
-    buttons.append({"text": btn_text, "url": url, "row": row})
-    await chat_repo.upsert_settings(chat_id, {"welcome_buttons": buttons})
+    await chat_repo.upsert_settings(chat_id, {"welcome_buttons": combined})
     await state.clear()
 
-    await message.answer(f"✅ Button added: <b>{btn_text}</b> → {url}")
+    summary = "\n".join(
+        f"• <b>{b['text']}</b> → "
+        + (f"<code>{b['url']}</code>" if b['url'] else f"popup: {b['callback_data'][7:]}")
+        for b in new_buttons
+    )
+    suffix = "\n\n⚠️ Truncated to 10 buttons." if truncated else ""
+    await message.answer(f"✅ Added {len(new_buttons)} button(s):\n{summary}{suffix}")
     await _render_editor(message, chat_repo, chat_id)
 
 
