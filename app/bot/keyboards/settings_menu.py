@@ -34,7 +34,7 @@ def approval_settings_keyboard(
         builder.button(text=btn_text, callback_data=f"approval:delay:{chat_id}:{val}")
 
     builder.button(text="✏️ Custom", callback_data=f"approval:delay:{chat_id}:custom")
-    builder.button(text="← Back", callback_data=f"chat:select:{chat_id}")
+    builder.button(text="← Back to Menu", callback_data="menu:main")
 
     # Row 1: two toggles (auto approval, captcha). Row 2+: 2 delay per row, 4 rows.
     builder.adjust(2, 2, 2, 2, 2, 1)
@@ -68,7 +68,7 @@ def welcome_settings_keyboard(
     builder.button(text=buttons_label, callback_data=f"welcome:edit_buttons:{chat_id}")
     builder.button(text="👁 Preview", callback_data=f"welcome:preview:{chat_id}")
     builder.button(text="🗑 Clear", callback_data=f"welcome:clear:{chat_id}")
-    builder.button(text="← Back", callback_data=f"chat:select:{chat_id}")
+    builder.button(text="← Back to Menu", callback_data="menu:main")
 
     builder.adjust(2, 2, 1, 1)
     return builder.as_markup()

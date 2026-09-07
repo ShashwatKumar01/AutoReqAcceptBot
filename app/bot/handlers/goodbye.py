@@ -208,7 +208,7 @@ def _goodbye_editor_keyboard(
     b.button(text=f"🔘 Buttons ({btn_count})",
              callback_data=f"goodbye:buttons:{chat_id}")
     b.button(text="👁 Preview", callback_data=f"goodbye:preview:{chat_id}")
-    b.button(text="← Back to Chat", callback_data=f"chat:select:{chat_id}")
+    b.button(text="← Back to Menu", callback_data="menu:main")
     b.adjust(1)
     return b.as_markup()
 

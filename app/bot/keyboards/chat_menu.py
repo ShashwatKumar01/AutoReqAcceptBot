@@ -44,7 +44,11 @@ def welcome_chat_picker_keyboard(chats: list[dict]) -> InlineKeyboardMarkup:
 
 
 def chat_action_keyboard(chat_id: int) -> InlineKeyboardMarkup:
-    """Actions for a specific chat."""
+    """
+    Legacy per-chat action panel. No longer reached from the main flow —
+    the master menu replaces it. Kept for any leftover references; the
+    `← Back` button now goes to the master menu.
+    """
     builder = InlineKeyboardBuilder()
 
     # Row 1
@@ -58,7 +62,7 @@ def chat_action_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     builder.button(text="🔄 Refresh", callback_data=f"chat:refresh:{chat_id}")
     # Row 4
     builder.button(text="❌ Disconnect", callback_data=f"chat:disconnect:{chat_id}")
-    builder.button(text="← Back", callback_data="menu:chats")
+    builder.button(text="← Back to Menu", callback_data="menu:main")
 
     builder.adjust(2, 2, 2, 2)
     return builder.as_markup()

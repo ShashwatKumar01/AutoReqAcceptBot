@@ -84,10 +84,9 @@ async def show_stats(message: Message, chat_id: int, chat_repo, join_request_rep
     
     b = InlineKeyboardBuilder()
     b.button(text="🔄 Refresh", callback_data=f"stats:refresh:{chat_id}")
-    b.button(text="← Back", callback_data=f"chat:select:{chat_id}")
     b.button(text="← Back to Menu", callback_data="menu:main")
     b.adjust(1)
-    
+
     await message.answer(text, reply_markup=b.as_markup())
 
 async def show_stats_cb(callback: CallbackQuery, chat_id: int, chat_repo, join_request_repo):
@@ -107,8 +106,7 @@ async def show_stats_cb(callback: CallbackQuery, chat_id: int, chat_repo, join_r
     
     b = InlineKeyboardBuilder()
     b.button(text="🔄 Refresh", callback_data=f"stats:refresh:{chat_id}")
-    b.button(text="← Back", callback_data=f"chat:select:{chat_id}")
     b.button(text="← Back to Menu", callback_data="menu:main")
     b.adjust(1)
-    
+
     await callback.message.edit_text(text, reply_markup=b.as_markup())

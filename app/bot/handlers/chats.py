@@ -45,58 +45,68 @@ async def chats_menu_callback(callback: CallbackQuery, chat_repo):
     await callback.answer()
 
 @router.callback_query(F.data.startswith('chat:select:'))
-async def select_chat_callback(callback: CallbackQuery, chat_repo):
-    """Show chat detail with action buttons."""
-    chat_id = int(callback.data.split(':')[2])
-    chat = await chat_repo.get(chat_id)
-    
-    if not chat:
-        return await callback.answer("Chat not found.", show_alert=True)
-        
+async def select_chat_callback(callback: CallbackQuery, chat_repo, is_super_admin: bool):
+    """
+    Legacy per-chat action panel. Removed from the main flow — any
+    leftover reference (e.g. an old inline button) now bounces back to
+    the master menu instead of opening the deprecated panel.
+    """
+    user_id = callback.from_user.id
+    chats = await chat_repo.get_by_admin(user_id)
+    from ..keyboards.main_menu import main_menu_keyboard
     text = (
-        f"💬 <b>{chat.get('title', 'Unknown Chat')}</b>\n\n"
-        f"Status: {chat.get('status', 'Unknown')}\n"
-        "Select an action to configure:"
+        "📋 <b>Main Menu</b>\n\n"
+        f"Connected chats: <b>{len(chats)}</b>"
     )
-    await callback.message.edit_text(text, reply_markup=chat_action_keyboard(chat_id))
+    try:
+        await callback.message.edit_text(text, reply_markup=main_menu_keyboard(is_super_admin=is_super_admin))
+    except Exception:
+        pass
+    await callback.answer()
 
 @router.callback_query(F.data.startswith('chat:refresh:'))
-async def refresh_single_chat(callback: CallbackQuery, chat_repo):
-    """Refresh permissions for a single chat."""
-    chat_id = int(callback.data.split(':')[2])
-    await callback.answer("Chat status refreshed!")
-    
-    # Reload menu
-    chat = await chat_repo.get(chat_id)
-    if chat:
-        text = f"💬 <b>{chat.get('title', 'Unknown Chat')}</b>\n\nStatus: {chat.get('status', 'Unknown')}\nSelect an action to configure:"
-        try:
-            await callback.message.edit_text(text, reply_markup=chat_action_keyboard(chat_id))
-        except Exception:
-            pass  # Suppress "message is not modified" errors
+async def refresh_single_chat(callback: CallbackQuery, chat_repo, is_super_admin: bool):
+    """Legacy — re-renders the master menu."""
+    user_id = callback.from_user.id
+    chats = await chat_repo.get_by_admin(user_id)
+    from ..keyboards.main_menu import main_menu_keyboard
+    text = (
+        "📋 <b>Main Menu</b>\n\n"
+        f"Connected chats: <b>{len(chats)}</b>"
+    )
+    try:
+        await callback.message.edit_text(text, reply_markup=main_menu_keyboard(is_super_admin=is_super_admin))
+    except Exception:
+        pass
+    await callback.answer("Refreshed.")
+
 
 @router.callback_query(F.data.startswith('chat:disconnect:'))
-async def disconnect_chat(callback: CallbackQuery, chat_repo):
-    """Disconnect a chat."""
+async def disconnect_chat(callback: CallbackQuery, chat_repo, is_super_admin: bool):
+    """Disconnect a chat, then return to the master menu."""
     parts = callback.data.split(':')
     if len(parts) > 3 and parts[2] == 'confirm':
         chat_id = int(parts[3])
         await chat_repo.update_status(chat_id, "disconnected")
         await callback.answer("Chat disconnected!")
-        
-        # Go back to chats list
-        user_id = callback.from_user.id
-        chats = await chat_repo.get_by_admin(user_id)
-        await callback.message.edit_text(
-            "Here are your connected chats:",
-            reply_markup=chat_list_keyboard(chats)
-        )
     else:
         chat_id = int(parts[2])
-        # Need keyboard builder for confirm
         from aiogram.utils.keyboard import InlineKeyboardBuilder
         b = InlineKeyboardBuilder()
         b.button(text="⚠️ Confirm Disconnect", callback_data=f"chat:disconnect:confirm:{chat_id}")
-        b.button(text="← Cancel", callback_data=f"chat:select:{chat_id}")
+        b.button(text="← Cancel", callback_data="menu:main")
         b.adjust(1)
         await callback.message.edit_text("Are you sure you want to disconnect this chat?", reply_markup=b.as_markup())
+        return
+
+    user_id = callback.from_user.id
+    chats = await chat_repo.get_by_admin(user_id)
+    from ..keyboards.main_menu import main_menu_keyboard
+    text = (
+        "📋 <b>Main Menu</b>\n\n"
+        f"Connected chats: <b>{len(chats)}</b>"
+    )
+    try:
+        await callback.message.edit_text(text, reply_markup=main_menu_keyboard(is_super_admin=is_super_admin))
+    except Exception:
+        pass
