@@ -1,9 +1,43 @@
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..keyboards.main_menu import main_menu_keyboard, welcome_start_keyboard
 
 router = Router()
+
+
+def _start_keyboard(has_chats: bool, bot_username: str, is_super_admin: bool):
+    """
+    /start output keyboard.
+
+    - Always primary: Add to Group / Add to Channel (deep-links).
+    - If the user already has chats connected, also show a single
+      "📋 Open Menu" button that opens the full main menu.
+    - Super admin: also show "👑 Admin Panel" button.
+    """
+    builder = InlineKeyboardBuilder()
+    if bot_username:
+        builder.button(
+            text="➕ Add to Group",
+            url=f"https://t.me/{bot_username}?startgroup=true",
+        )
+        builder.button(
+            text="➕ Add to Channel",
+            url=f"https://t.me/{bot_username}?startchannel=true",
+        )
+    if has_chats:
+        builder.button(text="📋 Open Menu", callback_data="menu:open")
+    if is_super_admin:
+        builder.button(text="👑 Admin Panel", callback_data="admin:main")
+    if bot_username and has_chats:
+        builder.adjust(2, 1, 1)
+    elif bot_username:
+        builder.adjust(2)
+    else:
+        builder.adjust(1, 1, 1)
+    return builder.as_markup()
+
 
 @router.message(CommandStart())
 async def start_handler(
@@ -15,14 +49,14 @@ async def start_handler(
 ):
     """
     1. Register/update user (done via AuthMiddleware)
-    2. Show welcome message with main menu keyboard
-    3. If user has connected chats: show My Chats summary
-    4. If new user: show setup tutorial prompt + Add to Group/Channel deep-links
+    2. /start is intentionally minimal — only "Add to Group / Add to Channel".
+       Use 📋 Open Menu (or /menu) for the full setup.
     """
     user_id = message.from_user.id
     chats = await chat_repo.get_by_admin(user_id)
+    has_chats = bool(chats)
 
-    if not chats:
+    if not has_chats:
         text = (
             "👋 <b>Welcome to Auto Request Manager!</b>\n\n"
             "I can automatically accept join requests to your Telegram groups "
@@ -30,21 +64,36 @@ async def start_handler(
             "videos, and premium emoji).\n\n"
             "<b>To get started, add me to a group or channel:</b>"
         )
-        await message.answer(text, reply_markup=welcome_start_keyboard(bot_username=bot_username))
     else:
         text = (
-            "👋 <b>Welcome back to Auto Request Manager!</b>\n\n"
-            f"You have <b>{len(chats)}</b> connected chats.\n"
-            "What would you like to do?"
+            f"👋 You're connected to <b>{len(chats)}</b> chat(s).\n"
+            "Add another one or open the menu to configure."
         )
-        await message.answer(text, reply_markup=main_menu_keyboard(is_super_admin=is_super_admin))
-        # Also re-surface the Add buttons as a follow-up so growing users can
-        # add another chat without leaving the menu.
-        if bot_username:
-            await message.answer(
-                "Need to add another chat?",
-                reply_markup=welcome_start_keyboard(bot_username=bot_username),
-            )
+    await message.answer(text, reply_markup=_start_keyboard(has_chats, bot_username, is_super_admin))
+
+
+@router.callback_query(F.data == "menu:open")
+async def open_menu_callback(callback: CallbackQuery, chat_repo, is_super_admin: bool):
+    """Open the full main menu from /start."""
+    user_id = callback.from_user.id
+    chats = await chat_repo.get_by_admin(user_id)
+    text = (
+        "📋 <b>Main Menu</b>\n\n"
+        f"Connected chats: <b>{len(chats)}</b>"
+    )
+    await callback.message.edit_text(text, reply_markup=main_menu_keyboard(is_super_admin=is_super_admin))
+    await callback.answer()
+
+
+@router.message(Command("menu"))
+async def menu_command(message: Message, chat_repo, is_super_admin: bool):
+    user_id = message.from_user.id
+    chats = await chat_repo.get_by_admin(user_id)
+    text = (
+        "📋 <b>Main Menu</b>\n\n"
+        f"Connected chats: <b>{len(chats)}</b>"
+    )
+    await message.answer(text, reply_markup=main_menu_keyboard(is_super_admin=is_super_admin))
 
 @router.message(Command('help'))
 async def help_handler(message: Message):
@@ -52,7 +101,8 @@ async def help_handler(message: Message):
     help_text = (
         "❓ <b>Bot Help</b>\n\n"
         "<b>Commands:</b>\n"
-        "/start - Start the bot\n"
+        "/start - Start the bot (shows Add buttons)\n"
+        "/menu - Open the full main menu\n"
         "/help - Show this help message\n"
         "/tutorial - View the setup tutorial\n"
         "/mychannels - List your connected chats\n"

@@ -4,6 +4,9 @@ RequestAcceptBot — Main Entry Point
 Modes:
 - Production: Webhook mode (ENVIRONMENT=production)
 - Development: Long polling mode (ENVIRONMENT=development)
+
+Workers (broadcast + approval) run in-process as background asyncio tasks
+so a single Railway service handles everything.
 """
 import asyncio
 import os
@@ -21,13 +24,22 @@ from app.core.logging import configure_logging, get_logger
 from app.database.connection import db_manager
 from app.database.repositories import (
     UserRepository, ChatRepository, JoinRequestRepository,
-    BroadcastRepository, SubscriptionRepository
+    BroadcastRepository, SubscriptionRepository,
 )
 from app.bot.middlewares.database import DatabaseMiddleware
 from app.bot.middlewares.auth import AuthMiddleware
 from app.bot.middlewares.throttling import ThrottlingMiddleware
 from app.bot.middlewares.logging import LoggingMiddleware
 from app.bot.handlers import setup_routers
+from app.services.rate_limiter import TelegramRateLimiter
+from app.services.telegram_service import TelegramService
+from app.services.subscription_service import SubscriptionService
+from app.services.entitlement_service import EntitlementService
+from app.services.approval_service import ApprovalService
+from app.services.welcome_service import WelcomeService
+from app.services.broadcast_service import BroadcastService
+from app.workers.approval_worker import ApprovalWorker
+from app.workers.broadcast_worker import BroadcastWorker
 
 
 async def health_check(request: web.Request) -> web.Response:
@@ -75,51 +87,127 @@ async def main() -> None:
     main_router = setup_routers()
     dp.include_router(main_router)
 
-    if settings.is_production:
-        webhook_url = f"{settings.webhook_url}{settings.webhook_path}"
-        await bot.set_webhook(
-            url=webhook_url,
-            secret_token=settings.webhook_secret,
-            allowed_updates=dp.resolve_used_update_types(),
-            drop_pending_updates=True,
-        )
-        logger.info("Webhook set", url=webhook_url)
+    # Build shared services for the workers
+    user_repo = UserRepository(db)
+    chat_repo = ChatRepository(db)
+    join_request_repo = JoinRequestRepository(db)
+    broadcast_repo = BroadcastRepository(db)
+    subscription_repo = SubscriptionRepository(db)
 
-        app = web.Application()
-        webhook_handler = SimpleRequestHandler(
-            dispatcher=dp,
-            bot=bot,
-            secret_token=settings.webhook_secret,
-        )
-        webhook_handler.register(app, path=settings.webhook_path)
-        app.router.add_get('/health', health_check)
-        setup_application(app, dp, bot=bot)
+    await subscription_repo.seed_default_plans()
 
-        runner = web.AppRunner(app)
-        await runner.setup()
-        # Railway injects $PORT; honor it if present, else fall back to APP_PORT.
-        port = int(os.environ.get('PORT', settings.app_port))
-        site = web.TCPSite(runner, host="0.0.0.0", port=port)
-        logger.info(f"Starting webhook server on 0.0.0.0:{port}")
-        await site.start()
+    rate_limiter = TelegramRateLimiter(redis_client)
+    telegram_service = TelegramService(bot, rate_limiter)
+    subscription_service = SubscriptionService(subscription_repo)
+    entitlement_service = EntitlementService(subscription_service)
 
-        stop_event = asyncio.Event()
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, stop_event.set)
-            except NotImplementedError:
-                pass
-        await stop_event.wait()
-        await runner.cleanup()
-    else:
-        logger.info("Starting long polling...")
-        await bot.delete_webhook(drop_pending_updates=True)
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    approval_service = ApprovalService(
+        join_request_repo=join_request_repo,
+        chat_repo=chat_repo,
+        telegram_service=telegram_service,
+        welcome_service=None,  # welcome happens inline in join_requests handler
+        redis_client=redis_client,
+    )
+    welcome_service = WelcomeService(
+        chat_repo=chat_repo,
+        telegram_service=telegram_service,
+        join_request_repo=join_request_repo,
+    )
+    broadcast_service = BroadcastService(
+        broadcast_repo=broadcast_repo,
+        join_request_repo=join_request_repo,
+        user_repo=user_repo,
+        chat_repo=chat_repo,
+        entitlement_service=entitlement_service,
+        telegram_service=telegram_service,
+        rate_limiter=rate_limiter,
+    )
 
-    await bot.session.close()
-    await redis_client.aclose()
-    await db_manager.disconnect()
+    approval_worker = ApprovalWorker(
+        approval_service=approval_service,
+        welcome_service=welcome_service,
+        poll_interval=5,
+    )
+    broadcast_worker = BroadcastWorker(
+        broadcast_service=broadcast_service,
+        broadcast_repo=broadcast_repo,
+        telegram_service=telegram_service,
+        rate_limiter=rate_limiter,
+        user_repo=user_repo,
+        chat_repo=chat_repo,
+        batch_size=getattr(settings, "broadcast_batch_size", 200),
+        poll_interval=10,
+    )
+
+    # Run workers as background tasks alongside the bot
+    approval_task = asyncio.create_task(approval_worker.start(), name="approval-worker")
+    broadcast_task = asyncio.create_task(broadcast_worker.start(), name="broadcast-worker")
+    logger.info("Background workers started: approval + broadcast")
+
+    try:
+        if settings.is_production:
+            webhook_url = f"{settings.webhook_url}{settings.webhook_path}"
+            await bot.set_webhook(
+                url=webhook_url,
+                secret_token=settings.webhook_secret,
+                allowed_updates=dp.resolve_used_update_types(),
+                drop_pending_updates=True,
+            )
+            logger.info("Webhook set", url=webhook_url)
+
+            app = web.Application()
+            webhook_handler = SimpleRequestHandler(
+                dispatcher=dp,
+                bot=bot,
+                secret_token=settings.webhook_secret,
+            )
+            webhook_handler.register(app, path=settings.webhook_path)
+            app.router.add_get('/health', health_check)
+            setup_application(app, dp, bot=bot)
+
+            runner = web.AppRunner(app)
+            await runner.setup()
+            # Railway injects $PORT; honor it if present, else fall back to APP_PORT.
+            port = int(os.environ.get('PORT', settings.app_port))
+            site = web.TCPSite(runner, host="0.0.0.0", port=port)
+            logger.info(f"Starting webhook server on 0.0.0.0:{port}")
+            await site.start()
+
+            stop_event = asyncio.Event()
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                try:
+                    loop.add_signal_handler(sig, stop_event.set)
+                except NotImplementedError:
+                    pass
+            await stop_event.wait()
+
+            # Stop workers on shutdown
+            approval_worker.running = False
+            broadcast_worker.running = False
+            for t in (approval_task, broadcast_task):
+                t.cancel()
+            await runner.cleanup()
+        else:
+            logger.info("Starting long polling...")
+            await bot.delete_webhook(drop_pending_updates=True)
+            await dp.start_polling(
+                bot,
+                allowed_updates=dp.resolve_used_update_types(),
+            )
+
+            # Stop workers on shutdown
+            approval_worker.running = False
+            broadcast_worker.running = False
+            for t in (approval_task, broadcast_task):
+                t.cancel()
+    finally:
+        for t in (approval_task, broadcast_task):
+            if not t.done():
+                t.cancel()
+        await bot.session.close()
+        await redis_client.aclose()
+        await db_manager.disconnect()
 
 
 if __name__ == '__main__':
