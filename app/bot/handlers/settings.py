@@ -1,7 +1,7 @@
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
-from ..keyboards.chat_menu import chat_list_keyboard, chat_action_keyboard
+from ..keyboards.main_menu import main_menu_keyboard
 from app.core.logging import get_logger
 
 router = Router()
@@ -9,44 +9,30 @@ logger = get_logger('settings')
 
 
 @router.message(Command('settings'))
-async def settings_command(message: Message, chat_repo):
-    """Show settings for all connected chats or prompt to select one."""
+async def settings_command(message: Message, chat_repo, is_super_admin: bool):
+    """
+    /settings is an alias for the main menu.
+    Per-chat configuration lives inside each menu entry
+    (Welcome / Goodbye / Stats / Broadcast), each of which shows the
+    chat picker.
+    """
     user_id = message.from_user.id
     chats = await chat_repo.get_by_admin(user_id)
-    logger.info("settings_command", user_id=user_id, chat_count=len(chats),
-                chat_ids=[c.get('chat_id') for c in chats])
-
-    if not chats:
-        await message.answer("You don't have any connected chats. Please add the bot to a chat first.")
-        return
-
-    await message.answer(
-        "Select a chat to view its settings:",
-        reply_markup=chat_list_keyboard(chats)
+    text = (
+        "⚙️ <b>Settings & Menu</b>\n\n"
+        f"Connected chats: <b>{len(chats)}</b>\n"
+        "Pick a section to configure:"
     )
+    await message.answer(text, reply_markup=main_menu_keyboard(is_super_admin=is_super_admin))
+
 
 @router.callback_query(F.data == 'menu:settings')
-async def settings_menu(callback: CallbackQuery, chat_repo):
-    """Settings from main menu."""
+async def settings_menu(callback: CallbackQuery, chat_repo, is_super_admin: bool):
     user_id = callback.from_user.id
     chats = await chat_repo.get_by_admin(user_id)
-    
-    if not chats:
-        await callback.answer("You don't have any connected chats.", show_alert=True)
-        return
-        
-    await callback.message.edit_text(
-        "Select a chat to view its settings:",
-        reply_markup=chat_list_keyboard(chats)
+    text = (
+        "⚙️ <b>Settings & Menu</b>\n\n"
+        f"Connected chats: <b>{len(chats)}</b>"
     )
-
-@router.callback_query(F.data.startswith('settings:chat:'))
-async def chat_settings_menu(callback: CallbackQuery, chat_repo):
-    """Show settings for a specific chat with all options."""
-    chat_id = int(callback.data.split(':')[2])
-    chat = await chat_repo.get(chat_id)
-    if not chat:
-        return await callback.answer("Chat not found.")
-        
-    text = f"⚙️ <b>Settings for {chat.get('title')}</b>\nChoose a category:"
-    await callback.message.edit_text(text, reply_markup=chat_action_keyboard(chat_id))
+    await callback.message.edit_text(text, reply_markup=main_menu_keyboard(is_super_admin=is_super_admin))
+    await callback.answer()

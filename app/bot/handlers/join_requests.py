@@ -32,6 +32,11 @@ async def handle_join_request(
     chat_id = event.chat.id
     from_user = event.from_user
 
+    logger.info("chat_join_request received",
+                chat_id=chat_id, user_id=user_id,
+                username=from_user.username,
+                chat_title=event.chat.title)
+
     # Look up chat settings to decide mode
     settings = await chat_repo.get_chat_settings_with_defaults(chat_id)
     captcha_enabled = bool(settings.get("captcha_enabled", False))
@@ -113,9 +118,31 @@ async def _approve_and_track(
     """
     try:
         await bot.approve_chat_join_request(chat_id=chat_id, user_id=user_id)
+        logger.info("Telegram approved join request",
+                    chat_id=chat_id, user_id=user_id)
     except Exception as e:
         logger.error("approve_chat_join_request failed",
-                     chat_id=chat_id, user_id=user_id, error=str(e))
+                     chat_id=chat_id, user_id=user_id, error=str(e),
+                     exc_info=True)
+        # Try to surface the failure to the chat owner so they know
+        # something's wrong (missing admin perms, bot blocked, etc.).
+        try:
+            chat_obj = await chat_repo.collection.find_one({"chat_id": chat_id})
+            owner_id = (chat_obj or {}).get("admin_id")
+            if owner_id:
+                await bot.send_message(
+                    chat_id=owner_id,
+                    text=(
+                        f"⚠️ <b>Auto-approval failed</b> for "
+                        f"<b>{(from_user.first_name or 'user')}</b> in "
+                        f"<b>{(chat_obj or {}).get('title', 'a chat')}</b>.\n\n"
+                        f"<code>{type(e).__name__}: {str(e)[:200]}</code>\n\n"
+                        "Make sure the bot has the <b>Add Members</b> / "
+                        "<b>Add Subscribers</b> permission."
+                    ),
+                )
+        except Exception:
+            pass
         return
 
     await join_request_repo.update(
