@@ -18,6 +18,10 @@ class TelegramRateLimiter:
         self.per_chat_limit = 1  # messages/second per chat for broadcast
         self.global_key = "rate_limit:telegram:global"
     
+    async def acquire(self) -> None:
+        """Alias used by broadcast worker."""
+        await self.acquire_global()
+
     async def acquire_global(self) -> None:
         """Wait until global rate limit allows a send. Uses Redis atomic counter."""
         while True:

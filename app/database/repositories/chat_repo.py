@@ -132,15 +132,12 @@ class ChatRepository:
 
     async def get_settings_with_defaults(self, chat_id: int) -> Dict[str, Any]:
         settings = await self.get_settings(chat_id)
-        if settings:
-            return settings
-
-        # Defaults for new chats
-        return {
+        defaults = {
             "chat_id": chat_id,
-            "auto_approve": False,
+            "auto_approval_enabled": True,
+            "approval_delay_seconds": 0,
+            "auto_approval_delay": 0,
             "captcha_enabled": False,
-            "delay_seconds": 0,
             # Welcome
             "welcome_enabled": True,
             "welcome_trigger": "on_approval",
@@ -150,4 +147,66 @@ class ChatRepository:
             "welcome_media_type": "",
             "welcome_buttons": [],
             "welcome_parse_mode": "HTML",
+            # Goodbye
+            "goodbye_enabled": False,
+            "goodbye_text": "",
+            "goodbye_media_file_id": "",
+            "goodbye_media_type": "",
+            "goodbye_buttons": [],
         }
+        if settings:
+            return {**defaults, **settings}
+        return defaults
+
+    def parse_approval_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize approval settings from chat_settings document."""
+        nested = settings.get("approval_settings") or {}
+        enabled = settings.get(
+            "auto_approval_enabled",
+            nested.get("enabled", True),
+        )
+        delay = settings.get(
+            "approval_delay_seconds",
+            settings.get(
+                "auto_approval_delay",
+                nested.get("delay", 0),
+            ),
+        )
+        return {
+            "enabled": bool(enabled),
+            "delay": int(delay or 0),
+            "captcha_enabled": bool(settings.get("captcha_enabled", False)),
+        }
+
+    async def get_approval_settings(self, chat_id: int) -> Dict[str, Any]:
+        settings = await self.get_settings_with_defaults(chat_id)
+        return self.parse_approval_settings(settings)
+
+    async def save_approval_settings(
+        self,
+        chat_id: int,
+        *,
+        enabled: bool | None = None,
+        delay: int | None = None,
+        captcha_enabled: bool | None = None,
+    ) -> Dict[str, Any]:
+        """Persist approval settings in both flat and nested formats."""
+        current = await self.get_approval_settings(chat_id)
+        if enabled is not None:
+            current["enabled"] = enabled
+        if delay is not None:
+            current["delay"] = delay
+        if captcha_enabled is not None:
+            current["captcha_enabled"] = captcha_enabled
+
+        await self.upsert_settings(chat_id, {
+            "auto_approval_enabled": current["enabled"],
+            "approval_delay_seconds": current["delay"],
+            "auto_approval_delay": current["delay"],
+            "approval_settings": {
+                "enabled": current["enabled"],
+                "delay": current["delay"],
+            },
+            "captcha_enabled": current["captcha_enabled"],
+        })
+        return current

@@ -106,13 +106,17 @@ async def help_handler(message: Message):
         "/help - Show this help message\n"
         "/tutorial - View the setup tutorial\n"
         "/mychannels - List your connected chats\n"
-        "/settings - Bot settings\n"
-        "/welcome - Configure welcome message for a chat\n"
-        "/goodbye - Configure goodbye message for a chat\n"
+        "/settings - Bot settings (= main menu)\n"
+        "/welcome - Configure welcome message\n"
+        "/goodbye - Configure goodbye message\n"
         "/stats - View statistics\n"
         "/broadcast - Send broadcast message\n"
         "/plan - View your plan\n"
-        "/captcha on|off - Toggle captcha verification (admins only)\n"
+        "/connect <chat_id> - Manually connect a chat by id\n"
+        "/disconnect <chat_id> - Disconnect a chat by id\n"
+        "/captcha on|off - Toggle captcha verification (admins only)\n\n"
+        "<b>Tip:</b> Forward any message from a channel/group to this bot "
+        "and I'll show its connection details."
     )
     await message.answer(help_text)
 

@@ -2,7 +2,7 @@ from aiogram import Router
 from . import (
     start, tutorial, chats, settings, approval, welcome, buttons,
     broadcast, stats, join_requests, chat_member, superadmin,
-    goodbye, plan,
+    goodbye, plan, connect,
 )
 
 def setup_routers() -> Router:
@@ -20,6 +20,7 @@ def setup_routers() -> Router:
     main_router.include_router(approval.router)
     main_router.include_router(welcome.router)
     main_router.include_router(goodbye.router)
+    main_router.include_router(connect.router)
     main_router.include_router(plan.router)
     main_router.include_router(buttons.router)
     main_router.include_router(broadcast.router)

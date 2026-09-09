@@ -50,7 +50,8 @@ class BroadcastRepository:
             {"$inc": {
                 "processed_count": processed,
                 "sent_count": sent,
-                "failed_count": failed
+                "failed_count": failed,
+                "progress": sent,
             }, "$set": {"updated_at": datetime.now(timezone.utc)}}
         )
         return result.modified_count > 0

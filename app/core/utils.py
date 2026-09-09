@@ -61,3 +61,34 @@ def chunk_list(lst: list[Any], size: int) -> Generator[list[Any], None, None]:
 
 def generate_job_id() -> str:
     return uuid.uuid4().hex
+
+
+def build_broadcast_payload(message) -> dict | None:
+    """Build a broadcast payload dict from an aiogram Message."""
+    payload: dict = {"parse_mode": "HTML"}
+    if message.text:
+        payload["type"] = "text"
+        payload["text"] = message.html_text or message.text
+    elif message.photo:
+        payload["type"] = "photo"
+        payload["photo"] = message.photo[-1].file_id
+        if message.caption:
+            payload["caption"] = message.html_text or message.caption
+    elif message.video:
+        payload["type"] = "video"
+        payload["video"] = message.video.file_id
+        if message.caption:
+            payload["caption"] = message.html_text or message.caption
+    elif message.document:
+        payload["type"] = "document"
+        payload["document"] = message.document.file_id
+        if message.caption:
+            payload["caption"] = message.html_text or message.caption
+    elif message.animation:
+        payload["type"] = "animation"
+        payload["animation"] = message.animation.file_id
+        if message.caption:
+            payload["caption"] = message.html_text or message.caption
+    else:
+        return None
+    return payload

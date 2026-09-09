@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 import uuid
 
+from app.core.utils import build_broadcast_payload
 from ..keyboards.broadcast_menu import broadcast_picker_keyboard, broadcast_confirm_keyboard, broadcast_control_keyboard
 
 class BroadcastStates(StatesGroup):
@@ -58,11 +59,13 @@ async def broadcast_chat_start(callback: CallbackQuery, state: FSMContext):
 
 @router.message(BroadcastStates.composing_message)
 async def receive_broadcast_message(message: Message, state: FSMContext, join_request_repo, chat_repo):
-    msg_data = {
-        'message_id': message.message_id,
-        'from_chat_id': message.chat.id
-    }
-    await state.update_data(msg_data=msg_data)
+    payload = build_broadcast_payload(message)
+    if not payload:
+        return await message.answer(
+            "Unsupported message type. Send text, photo, video, GIF, or document."
+        )
+
+    await state.update_data(payload=payload)
     
     data = await state.get_data()
     target = data.get('target')
@@ -70,16 +73,19 @@ async def receive_broadcast_message(message: Message, state: FSMContext, join_re
     
     user_id = message.from_user.id
     
-    # Calculate real recipient count
     estimate = 0
     if target == 'all':
         chats = await chat_repo.get_by_admin(user_id)
         for c in chats:
             c_id = c['chat_id']
-            count = await join_request_repo.collection.count_documents({"chat_id": c_id, "status": "approved"})
+            count = await join_request_repo.collection.count_documents(
+                {"chat_id": c_id, "status": "approved"}
+            )
             estimate += count
     else:
-        estimate = await join_request_repo.collection.count_documents({"chat_id": target_id, "status": "approved"})
+        estimate = await join_request_repo.collection.count_documents(
+            {"chat_id": target_id, "status": "approved"}
+        )
     
     await state.update_data(estimate=estimate)
     await state.set_state(BroadcastStates.confirming)
@@ -87,9 +93,10 @@ async def receive_broadcast_message(message: Message, state: FSMContext, join_re
     job_id = str(uuid.uuid4())
     await state.update_data(job_id=job_id)
     
+    target_label = "All Channels" if target == 'all' else "Specific Channel"
     text = (
         f"📊 <b>Broadcast Summary</b>\n\n"
-        f"Target: {'Specific Channel' if target == 'chat' else 'All Channels'}\n"
+        f"Target: {target_label}\n"
         f"Estimated recipients: {estimate}\n\n"
         "Are you ready to start?"
     )
@@ -101,24 +108,27 @@ async def confirm_broadcast(callback: CallbackQuery, state: FSMContext, broadcas
     job_id = data['job_id']
     target = data.get('target')
     target_id = data.get('target_id')
-    msg_data = data.get('msg_data')
+    payload = data.get('payload')
     estimate = data.get('estimate', 0)
     
     await broadcast_repo.create_job({
-        'job_id': job_id,
-        'user_id': callback.from_user.id,
+        '_id': job_id,
+        'owner_id': callback.from_user.id,
         'target': target,
         'target_id': target_id,
-        'msg_data': msg_data,
+        'payload': payload,
         'status': 'running',
-        'progress': 0,
-        'total': estimate
+        'recipients_prepared': False,
+        'sent_count': 0,
+        'failed_count': 0,
+        'total_recipients': estimate,
     })
     
     await state.clear()
     
     text = "🚀 Broadcast started!\n\nYou can control it below:"
     await callback.message.edit_text(text, reply_markup=broadcast_control_keyboard(job_id, "running"))
+    await callback.answer()
 
 @router.callback_query(F.data == 'broadcast:cancel_flow')
 async def cancel_broadcast_flow(callback: CallbackQuery, state: FSMContext):
@@ -132,18 +142,21 @@ async def pause_via_button(callback: CallbackQuery, broadcast_repo):
     job_id = callback.data.split(':')[2]
     await broadcast_repo.update_job_status(job_id, 'paused')
     await callback.message.edit_reply_markup(reply_markup=broadcast_control_keyboard(job_id, 'paused'))
+    await callback.answer()
 
 @router.callback_query(F.data.startswith('broadcast:resume:'))
 async def resume_via_button(callback: CallbackQuery, broadcast_repo):
     job_id = callback.data.split(':')[2]
     await broadcast_repo.update_job_status(job_id, 'running')
     await callback.message.edit_reply_markup(reply_markup=broadcast_control_keyboard(job_id, 'running'))
+    await callback.answer()
 
 @router.callback_query(F.data.startswith('broadcast:cancel:'))
 async def cancel_via_button(callback: CallbackQuery, broadcast_repo):
     job_id = callback.data.split(':')[2]
     await broadcast_repo.update_job_status(job_id, 'cancelled')
     await callback.message.edit_text("Broadcast cancelled.")
+    await callback.answer()
 
 @router.callback_query(F.data.startswith('broadcast:refresh_status:'))
 async def refresh_broadcast_status(callback: CallbackQuery, broadcast_repo):
@@ -153,13 +166,15 @@ async def refresh_broadcast_status(callback: CallbackQuery, broadcast_repo):
         return await callback.answer("Job not found.")
         
     status = job.get('status', 'unknown')
-    progress = job.get('progress', 0)
-    total = job.get('total', 1)
+    sent = job.get('sent_count', 0)
+    failed = job.get('failed_count', 0)
+    total = job.get('total_recipients', job.get('total', 1)) or 1
     
     text = (
         f"📊 <b>Broadcast Status</b>\n\n"
         f"Status: {status}\n"
-        f"Progress: {progress} / {total}\n"
+        f"Sent: {sent} / {total}\n"
+        f"Failed: {failed}\n"
     )
     
     if status in ['running', 'paused']:

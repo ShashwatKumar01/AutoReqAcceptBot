@@ -30,6 +30,7 @@ from app.bot.middlewares.database import DatabaseMiddleware
 from app.bot.middlewares.auth import AuthMiddleware
 from app.bot.middlewares.throttling import ThrottlingMiddleware
 from app.bot.middlewares.logging import LoggingMiddleware
+from app.bot.middlewares.services import ServicesMiddleware
 from app.bot.handlers import setup_routers
 from app.services.rate_limiter import TelegramRateLimiter
 from app.services.telegram_service import TelegramService
@@ -83,11 +84,7 @@ async def main() -> None:
     dp.update.middleware(ThrottlingMiddleware(redis_client))
     dp.update.middleware(LoggingMiddleware())
 
-    # Register all routers
-    main_router = setup_routers()
-    dp.include_router(main_router)
-
-    # Build shared services for the workers
+    # Build shared services (also injected into handlers)
     user_repo = UserRepository(db)
     chat_repo = ChatRepository(db)
     join_request_repo = JoinRequestRepository(db)
@@ -101,18 +98,25 @@ async def main() -> None:
     subscription_service = SubscriptionService(subscription_repo)
     entitlement_service = EntitlementService(subscription_service)
 
-    approval_service = ApprovalService(
-        join_request_repo=join_request_repo,
-        chat_repo=chat_repo,
-        telegram_service=telegram_service,
-        welcome_service=None,  # welcome happens inline in join_requests handler
-        redis_client=redis_client,
-    )
     welcome_service = WelcomeService(
         chat_repo=chat_repo,
         telegram_service=telegram_service,
         join_request_repo=join_request_repo,
     )
+    approval_service = ApprovalService(
+        join_request_repo=join_request_repo,
+        chat_repo=chat_repo,
+        telegram_service=telegram_service,
+        welcome_service=welcome_service,
+        redis_client=redis_client,
+        user_repo=user_repo,
+    )
+
+    dp.update.outer_middleware(ServicesMiddleware(welcome_service))
+
+    # Register all routers
+    main_router = setup_routers()
+    dp.include_router(main_router)
     broadcast_service = BroadcastService(
         broadcast_repo=broadcast_repo,
         join_request_repo=join_request_repo,

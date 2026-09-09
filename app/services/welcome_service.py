@@ -278,12 +278,14 @@ class WelcomeService:
         rows: dict[int, list] = {}
         for btn in buttons:
             row_idx = int(btn.get("row", 1))
-            rows.setdefault(row_idx, []).append(
-                InlineKeyboardButton(
-                    text=str(btn["text"])[:64],
-                    url=btn.get("url"),
-                )
-            )
+            kwargs = {"text": str(btn["text"])[:64]}
+            if btn.get("url"):
+                kwargs["url"] = btn["url"]
+            elif btn.get("callback_data"):
+                kwargs["callback_data"] = btn["callback_data"]
+            else:
+                continue
+            rows.setdefault(row_idx, []).append(InlineKeyboardButton(**kwargs))
         return InlineKeyboardMarkup(
             inline_keyboard=[rows[i] for i in sorted(rows)]
         )
