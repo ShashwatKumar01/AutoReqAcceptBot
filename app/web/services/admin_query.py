@@ -4,6 +4,7 @@ from typing import Any
 import uuid
 
 from app.web.services.system_health import check_system_health
+from app.services.broadcast_targets import estimate_recipients, TARGET_LABELS
 from app.web.utils import serialize_doc, broadcast_progress, mask_bot_token
 
 
@@ -315,34 +316,41 @@ class AdminQueryService:
         return row
 
     async def create_broadcast(self, owner_id: int, data: dict) -> dict:
+        payload = data.get('payload')
         text = (data.get('text') or '').strip()
-        if not text:
-            raise ValueError('text is required')
+        if not payload:
+            if not text:
+                raise ValueError('Message text or media is required')
+            payload = {'type': 'text', 'text': text, 'parse_mode': 'HTML'}
 
         target = data.get('target', 'all_users')
         target_id = data.get('target_id')
-        job_id = str(uuid.uuid4())
-        payload = {'type': 'text', 'text': text, 'parse_mode': 'HTML'}
+        needs_chat = target in ('chat', 'chat_members')
+        if needs_chat and not target_id:
+            raise ValueError('Chat ID is required for this target')
 
-        estimate = 0
-        if target == 'chat' and target_id:
-            estimate = await self.join_request_repo.collection.count_documents(
-                {'chat_id': int(target_id), 'status': 'approved'}
-            )
-        elif target == 'all':
-            chats = await self.chat_repo.get_by_admin(owner_id)
-            for c in chats:
-                estimate += await self.join_request_repo.collection.count_documents(
-                    {'chat_id': c['chat_id'], 'status': 'approved'}
-                )
-        else:
-            estimate = await self.user_repo.count()
+        chat_scope_owner_id = data.get('chat_scope_owner_id')
+        if target in ('all', 'all_chat_members', 'chat_admins'):
+            chat_scope_owner_id = None
+
+        job_id = str(uuid.uuid4())
+        estimate = await estimate_recipients(
+            target,
+            chat_scope_owner_id=chat_scope_owner_id,
+            target_id=int(target_id) if target_id else None,
+            user_repo=self.user_repo,
+            chat_repo=self.chat_repo,
+            join_request_repo=self.join_request_repo,
+        )
 
         await self.broadcast_repo.create_job({
             '_id': job_id,
             'owner_id': owner_id,
             'target': target,
             'target_id': int(target_id) if target_id else None,
+            'chat_scope_owner_id': chat_scope_owner_id,
+            'web_created': True,
+            'target_label': TARGET_LABELS.get(target, target),
             'payload': payload,
             'status': 'running',
             'recipients_prepared': False,

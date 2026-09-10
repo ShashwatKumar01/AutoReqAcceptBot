@@ -6,6 +6,7 @@ from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, Teleg
 from app.core.logging import get_logger
 from app.core.config import get_settings
 from app.services.broadcast_admin_notify import notify_broadcast_finished_if_needed
+from app.services.broadcast_targets import collect_recipient_ids
 from app.services.broadcast_status_message import refresh_active_broadcast_status_messages, refresh_broadcast_status_message
 
 class BroadcastWorker:
@@ -28,6 +29,7 @@ class BroadcastWorker:
         rate_limiter,
         user_repo=None,
         chat_repo=None,
+        join_request_repo=None,
         batch_size: int = 200,
         poll_interval: int = 10
     ):
@@ -37,6 +39,7 @@ class BroadcastWorker:
         self.rate_limiter = rate_limiter
         self.user_repo = user_repo
         self.chat_repo = chat_repo
+        self.join_request_repo = join_request_repo
         self.batch_size = batch_size
         self.poll_interval = poll_interval
         self.running = False
@@ -70,35 +73,31 @@ class BroadcastWorker:
         if job.get('recipients_prepared'):
             return True
 
-        target = job.get('target')
-        target_id = job.get('target_id')
-        owner_id = job.get('owner_id')
-
-        chat_ids: list[int] = []
-        if target == 'chat' and target_id:
-            chat_ids = [int(target_id)]
-        elif target == 'all' and owner_id and self.chat_repo:
-            chats = await self.chat_repo.get_by_admin(int(owner_id))
-            chat_ids = [c['chat_id'] for c in chats]
-        elif target in ('all_users', 'master') and self.user_repo:
-            cursor = self.user_repo.collection.find({}, {"telegram_id": 1, "_id": 0})
-            docs = await cursor.to_list(length=None)
-            user_ids = [d['telegram_id'] for d in docs]
-            if user_ids:
-                inserted = await self.broadcast_repo.add_recipients_bulk(job_id, user_ids)
-                await self.broadcast_repo.collection.update_one(
-                    {"_id": job_id},
-                    {"$set": {
-                        "recipients_prepared": True,
-                        "total_recipients": inserted,
-                    }},
-                )
-            return bool(user_ids)
-
-        if not chat_ids:
+        if not self.user_repo or not self.chat_repo or not self.join_request_repo:
             return False
 
-        inserted = await self.broadcast_repo.populate_recipients_from_chats(job_id, chat_ids)
+        target = job.get('target')
+        target_id = job.get('target_id')
+        scope = job.get('chat_scope_owner_id')
+        if scope is None and target in ('all', 'chat_admins') and not job.get('web_created'):
+            scope = job.get('owner_id')
+
+        user_ids = await collect_recipient_ids(
+            target,
+            chat_scope_owner_id=scope,
+            target_id=target_id,
+            user_repo=self.user_repo,
+            chat_repo=self.chat_repo,
+            join_request_repo=self.join_request_repo,
+        )
+        if not user_ids:
+            await self.broadcast_repo.collection.update_one(
+                {"_id": job_id},
+                {"$set": {"recipients_prepared": True, "total_recipients": 0}},
+            )
+            return False
+
+        inserted = await self.broadcast_repo.add_recipients_bulk(job_id, user_ids)
         await self.broadcast_repo.collection.update_one(
             {"_id": job_id},
             {"$set": {

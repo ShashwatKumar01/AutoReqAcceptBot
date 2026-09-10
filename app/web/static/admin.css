@@ -228,6 +228,12 @@ tr:hover td { background: rgba(91, 141, 239, .06); }
   font-size: .9rem;
 }
 .bot-strip code { font-size: .85rem; }
+
+.form-hint {
+  color: var(--muted);
+  font-size: .85rem;
+  margin: 0 0 1rem;
+}
 .clickable-row { cursor: pointer; }
 .token-row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
 .token-row code { word-break: break-all; }

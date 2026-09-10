@@ -6,6 +6,7 @@ from app.services.broadcast_admin_notify import (
     notify_broadcast_started,
 )
 from app.web.utils import parse_pagination
+from app.web.services.broadcast_media import upload_broadcast_media
 
 
 async def stats_overview(request: web.Request) -> web.Response:
@@ -64,15 +65,58 @@ async def get_broadcast(request: web.Request) -> web.Response:
     return web.json_response(data)
 
 
-async def create_broadcast(request: web.Request) -> web.Response:
+async def _parse_broadcast_create(request: web.Request) -> tuple[dict, dict]:
+    """Return (body for create_broadcast, log payload)."""
+    settings = request.app['settings']
+    if request.content_type and 'multipart/form-data' in request.content_type:
+        reader = await request.multipart()
+        fields: dict = {}
+        file_bytes = None
+        filename = 'upload'
+        while True:
+            part = await reader.next()
+            if part is None:
+                break
+            if part.filename:
+                file_bytes = await part.read(decode=False)
+                filename = part.filename
+            else:
+                fields[part.name] = (await part.text()) or ''
+        body = {
+            'target': fields.get('target', 'all_users'),
+            'text': fields.get('text', ''),
+        }
+        if fields.get('target_id'):
+            body['target_id'] = int(fields['target_id'])
+        if file_bytes:
+            bot = request.app.get('bot')
+            admin_id = settings.super_admin_id_list[0] if settings.super_admin_id_list else 0
+            if not bot or not admin_id:
+                raise ValueError('Bot not available for media upload')
+            caption = (fields.get('text') or '').strip() or None
+            body['payload'] = await upload_broadcast_media(
+                bot, admin_id, file_bytes, filename, caption=caption,
+            )
+            if body['payload'].get('type') != 'text':
+                body['text'] = ''
+        log_payload = {**body, 'media': bool(file_bytes)}
+        return body, log_payload
+
     try:
         body = await request.json()
     except json.JSONDecodeError:
-        return web.json_response({'error': 'Invalid JSON'}, status=400)
+        raise ValueError('Invalid JSON')
+    return body, body
 
-    owner_id = int(body.get('owner_id') or 0)
-    if not owner_id:
-        owner_id = request.app['settings'].super_admin_id_list[0] if request.app['settings'].super_admin_id_list else 0
+
+async def create_broadcast(request: web.Request) -> web.Response:
+    try:
+        body, log_payload = await _parse_broadcast_create(request)
+    except ValueError as e:
+        return web.json_response({'error': str(e)}, status=400)
+
+    settings = request.app['settings']
+    owner_id = settings.super_admin_id_list[0] if settings.super_admin_id_list else 0
 
     try:
         job = await request.app['admin_query'].create_broadcast(owner_id, body)
@@ -83,7 +127,7 @@ async def create_broadcast(request: web.Request) -> web.Response:
         admin_id=owner_id,
         action='broadcast_create',
         target=job.get('id', ''),
-        payload=body,
+        payload=log_payload,
     )
     bot = request.app.get('bot')
     job_id = job.get('id', '')

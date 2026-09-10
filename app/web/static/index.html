@@ -141,22 +141,24 @@
 
       <!-- Create Broadcast -->
       <section id="tab-create-broadcast" class="tab">
-        <form id="broadcast-form" class="form-card">
-          <label>Target
-            <select name="target" required>
-              <option value="all_users">All users (master)</option>
-              <option value="all">All channels (owner's chats)</option>
-              <option value="chat">Specific chat ID</option>
+        <form id="broadcast-form" class="form-card" enctype="multipart/form-data">
+          <p class="form-hint">Runs as super admin automatically — no owner ID needed.</p>
+          <label>Audience
+            <select name="target" id="broadcast-target" required>
+              <option value="all_users">All users who /start the bot</option>
+              <option value="all_chat_members">All members (every connected chat)</option>
+              <option value="chat_admins">All chat admins who added the bot</option>
+              <option value="chat_members">Members of one chat (enter chat ID below)</option>
             </select>
           </label>
-          <label>Chat ID <small>(only for specific chat)</small>
-            <input name="target_id" type="number" placeholder="-1001234567890" />
+          <label id="broadcast-chat-id-wrap">Chat ID
+            <input name="target_id" id="broadcast-target-id" type="number" placeholder="-1001234567890" />
           </label>
-          <label>Owner Telegram ID
-            <input name="owner_id" type="number" placeholder="Super admin ID" />
+          <label>Message <small>(HTML; used as caption if you attach media)</small>
+            <textarea name="text" id="broadcast-text" rows="6" placeholder="Hello everyone!"></textarea>
           </label>
-          <label>Message (HTML supported)
-            <textarea name="text" rows="6" required placeholder="Hello everyone!"></textarea>
+          <label>Photo / video / document / GIF (optional)
+            <input name="media" type="file" accept="image/*,video/*,.gif,.pdf,.doc,.docx,.zip" />
           </label>
           <button type="submit" class="btn primary">🚀 Start Broadcast</button>
           <p id="broadcast-form-msg" class="msg hidden"></p>

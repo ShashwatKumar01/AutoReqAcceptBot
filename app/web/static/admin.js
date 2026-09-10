@@ -478,22 +478,41 @@ async function init() {
 
   $('#refresh-btn').addEventListener('click', () => loadCurrentTab());
 
+  function syncBroadcastTargetFields() {
+    const target = $('#broadcast-target')?.value;
+    const wrap = $('#broadcast-chat-id-wrap');
+    const input = $('#broadcast-target-id');
+    const needsChat = target === 'chat_members';
+    if (wrap) wrap.style.display = needsChat ? '' : 'none';
+    if (input) input.required = needsChat;
+  }
+  $('#broadcast-target')?.addEventListener('change', syncBroadcastTargetFields);
+  syncBroadcastTargetFields();
+
   $('#broadcast-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
-    const body = {
-      target: fd.get('target'),
-      text: fd.get('text'),
-    };
-    if (fd.get('target_id')) body.target_id = parseInt(fd.get('target_id'), 10);
-    if (fd.get('owner_id')) body.owner_id = parseInt(fd.get('owner_id'), 10);
+    const text = (fd.get('text') || '').toString().trim();
+    const media = fd.get('media');
+    const hasMedia = media && media.size > 0;
+    if (!text && !hasMedia) {
+      const msg = $('#broadcast-form-msg');
+      msg.textContent = 'Enter a message or attach media.';
+      msg.className = 'msg err';
+      msg.classList.remove('hidden');
+      return;
+    }
     const msg = $('#broadcast-form-msg');
     try {
-      const job = await api('/api/admin/broadcasts', { method: 'POST', body: JSON.stringify(body) });
+      const headers = { Authorization: `Bearer ${token()}` };
+      const res = await fetch('/api/admin/broadcasts', { method: 'POST', headers, body: fd });
+      const job = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(job.error || res.statusText);
       msg.textContent = `Broadcast started: ${job.id}`;
       msg.className = 'msg ok';
       msg.classList.remove('hidden');
       e.target.reset();
+      syncBroadcastTargetFields();
       switchTab('broadcasts');
     } catch (err) {
       msg.textContent = err.message;

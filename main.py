@@ -179,6 +179,7 @@ async def main() -> None:
         rate_limiter=rate_limiter,
         user_repo=user_repo,
         chat_repo=chat_repo,
+        join_request_repo=join_request_repo,
         batch_size=getattr(settings, "broadcast_batch_size", 200),
         poll_interval=10,
     )
