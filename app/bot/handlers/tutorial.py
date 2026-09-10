@@ -3,6 +3,8 @@ from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from app.bot.keyboards.styled import STYLE_PRIMARY, STYLE_SUCCESS
+
 router = Router()
 
 TUTORIAL_SECTIONS = {
@@ -129,15 +131,27 @@ def tutorial_keyboard(section: str) -> InlineKeyboardMarkup:
     if current > 1:
         builder.button(text="◀️ Previous", callback_data=f"tutorial:{current - 1}")
     if current < total:
-        builder.button(text="Next ▶️", callback_data=f"tutorial:{current + 1}")
+        builder.button(
+            text="Next ▶️",
+            callback_data=f"tutorial:{current + 1}",
+            style=STYLE_PRIMARY,
+        )
     if current > 1 and current < total:
         builder.adjust(2)
     else:
         builder.adjust(1)
 
     builder.row(
-        InlineKeyboardButton(text="📑 All steps", callback_data="tutorial:index"),
-        InlineKeyboardButton(text="❓ /help", callback_data="menu:help"),
+        InlineKeyboardButton(
+            text="📑 All steps",
+            callback_data="tutorial:index",
+            style=STYLE_SUCCESS,
+        ),
+        InlineKeyboardButton(
+            text="❓ /help",
+            callback_data="menu:help",
+            style=STYLE_PRIMARY,
+        ),
     )
     builder.row(
         InlineKeyboardButton(text="← Main menu", callback_data="menu:main"),

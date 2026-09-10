@@ -1,6 +1,8 @@
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from app.bot.keyboards.styled import STYLE_LINK, STYLE_PRIMARY
+
 def main_menu_keyboard(is_super_admin: bool = False) -> InlineKeyboardMarkup:
     """Main menu shown after /start."""
     builder = InlineKeyboardBuilder()
@@ -12,7 +14,11 @@ def main_menu_keyboard(is_super_admin: bool = False) -> InlineKeyboardMarkup:
     builder.button(text="🚪 Goodbye", callback_data="menu:goodbye")
     builder.button(text="📢 Broadcast", callback_data="menu:broadcast")
     # Row 3 — tutorial before help
-    builder.button(text="📖 Tutorial", callback_data="menu:tutorial")
+    builder.button(
+        text="📖 Tutorial",
+        callback_data="menu:tutorial",
+        style=STYLE_PRIMARY,
+    )
     builder.button(text="❓ Help", callback_data="menu:help")
     # Row 4
     builder.button(text="📊 Statistics", callback_data="menu:stats")
@@ -51,14 +57,20 @@ def welcome_start_keyboard(bot_username: str = "") -> InlineKeyboardMarkup:
         builder.button(
             text="➕ Add to Group",
             url=f"https://t.me/{bot_username}?startgroup=true",
+            style=STYLE_LINK,
         )
         builder.button(
             text="➕ Add to Channel",
             url=f"https://t.me/{bot_username}?startchannel=true",
+            style=STYLE_LINK,
         )
 
     # Row 2: secondary actions
-    builder.button(text="📖 Setup Tutorial", callback_data="tutorial:1")
+    builder.button(
+        text="📖 Setup Tutorial",
+        callback_data="tutorial:1",
+        style=STYLE_PRIMARY,
+    )
     builder.button(text="🔄 Refresh Chats", callback_data="menu:refresh")
 
     if bot_username:

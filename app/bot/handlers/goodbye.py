@@ -220,25 +220,22 @@ def _goodbye_editor_keyboard(
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     b = InlineKeyboardBuilder()
     toggle = "✅" if enabled else "❌"
-    b.button(text=f"{toggle} Goodbye {'ON' if enabled else 'OFF'}",
-             callback_data=f"goodbye:toggle:{chat_id}")
-    text_icon = "✅ " if has_text else ""
-    b.button(text=f"📝 {text_icon}{'Edit' if has_text else 'Add'} Message",
-             callback_data=f"goodbye:edit_text:{chat_id}")
-    media_icon = "✅ " if has_media else ""
-    b.button(text=f"🖼 {media_icon}{'Change' if has_media else 'Add'} Photo/Video",
-             callback_data=f"goodbye:set_media:{chat_id}")
+    b.button(text=f"{toggle} Goodbye", callback_data=f"goodbye:toggle:{chat_id}")
+    text_icon = "✅" if has_text else "➕"
+    b.button(text=f"📝 {text_icon} Message", callback_data=f"goodbye:edit_text:{chat_id}")
+    media_icon = "✅" if has_media else "➕"
+    b.button(text=f"🖼 {media_icon} Media", callback_data=f"goodbye:set_media:{chat_id}")
     if has_media:
-        b.button(text="🗑 Remove Media",
-                 callback_data=f"goodbye:remove_media:{chat_id}")
-    b.button(text=f"🔘 Buttons ({btn_count})",
-             callback_data=f"goodbye:buttons:{chat_id}")
-    freq_label = "Once only" if frequency == "once" else "Every leave"
-    b.button(text=f"🔁 Frequency: {freq_label}",
-             callback_data=f"goodbye:freq_toggle:{chat_id}")
+        b.button(text="🗑 Clear media", callback_data=f"goodbye:remove_media:{chat_id}")
+    b.button(text=f"🔘 Buttons · {btn_count}", callback_data=f"goodbye:buttons:{chat_id}")
+    freq_short = "Once" if frequency == "once" else "Every leave"
+    b.button(text=f"🔁 {freq_short}", callback_data=f"goodbye:freq_toggle:{chat_id}")
     b.button(text="👁 Preview", callback_data=f"goodbye:preview:{chat_id}")
-    b.button(text="← Back to Menu", callback_data="menu:main")
-    b.adjust(1)
+    b.button(text="← Menu", callback_data="menu:main")
+    if has_media:
+        b.adjust(2, 2, 2, 1, 1)
+    else:
+        b.adjust(2, 2, 2, 1)
     return b.as_markup()
 
 
@@ -272,8 +269,8 @@ def welcome_chat_picker_keyboard_with_prefix(chats, prefix: str):
         title = c.get("title", "Chat")
         chat_id = c.get("chat_id")
         b.button(text=f"💬 {title}", callback_data=f"{prefix}:{chat_id}")
-    b.button(text="← Back", callback_data="menu:main")
-    b.adjust(1)
+    b.button(text="← Menu", callback_data="menu:main")
+    b.adjust(2, 1)
     return b.as_markup()
 
 
@@ -479,13 +476,13 @@ def _goodbye_buttons_keyboard(chat_id: int, buttons: list) -> InlineKeyboardMark
         label = btn.get("text", f"Button {i+1}")[:20]
         url_short = btn.get("url", "")[:25]
         b.button(
-            text=f"🗑 [{i+1}] {label} → {url_short}",
+            text=f"🗑{i + 1} {label}",
             callback_data=f"goodbye:btn_remove:{chat_id}:{i}",
         )
     if len(buttons) < 10:
-        b.button(text="➕ Add Buttons", callback_data=f"goodbye:btn_add:{chat_id}")
+        b.button(text="➕ Add", callback_data=f"goodbye:btn_add:{chat_id}")
     b.button(text="← Back", callback_data=f"goodbye:edit:{chat_id}")
-    b.adjust(1)
+    b.adjust(2)
     return b.as_markup()
 
 

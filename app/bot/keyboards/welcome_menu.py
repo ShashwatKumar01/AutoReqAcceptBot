@@ -31,29 +31,32 @@ def welcome_editor_keyboard(
     b = InlineKeyboardBuilder()
 
     toggle_icon = "✅" if enabled else "❌"
-    b.button(text=f"{toggle_icon} Welcome {'ON' if enabled else 'OFF'}", callback_data=f"welcome:toggle:{chat_id}")
+    b.button(text=f"{toggle_icon} Welcome", callback_data=f"welcome:toggle:{chat_id}")
 
-    text_icon = "✅ " if has_text else ""
-    b.button(text=f"📝 {text_icon}{'Edit' if has_text else 'Add'} Message", callback_data=f"welcome:edit_text:{chat_id}")
+    text_icon = "✅" if has_text else "➕"
+    b.button(text=f"📝 {text_icon} Message", callback_data=f"welcome:edit_text:{chat_id}")
 
-    media_icon = "✅ " if has_media else ""
-    b.button(text=f"🖼 {media_icon}{'Change' if has_media else 'Add'} Photo/Video", callback_data=f"welcome:set_media:{chat_id}")
+    media_icon = "✅" if has_media else "➕"
+    b.button(text=f"🖼 {media_icon} Media", callback_data=f"welcome:set_media:{chat_id}")
 
     if has_media:
-        b.button(text="🗑 Remove Media", callback_data=f"welcome:remove_media:{chat_id}")
+        b.button(text="🗑 Clear media", callback_data=f"welcome:remove_media:{chat_id}")
 
-    b.button(text=f"🔘 Buttons ({btn_count})", callback_data=f"welcome:buttons:{chat_id}")
+    b.button(text=f"🔘 Buttons · {btn_count}", callback_data=f"welcome:buttons:{chat_id}")
 
     trigger_label = _trigger_label(trigger, delay)
-    b.button(text=f"⏰ Timing: {trigger_label}", callback_data=f"welcome:timing:{chat_id}")
+    b.button(text=f"⏰ {trigger_label}", callback_data=f"welcome:timing:{chat_id}")
 
-    freq_label = "Once only" if frequency == "once" else "Every join"
-    b.button(text=f"🔁 Frequency: {freq_label}", callback_data=f"welcome:freq_toggle:{chat_id}")
+    freq_short = "Once" if frequency == "once" else "Every join"
+    b.button(text=f"🔁 {freq_short}", callback_data=f"welcome:freq_toggle:{chat_id}")
 
     b.button(text="👁 Preview", callback_data=f"welcome:preview:{chat_id}")
-    b.button(text="← Back to Menu", callback_data="menu:main")
+    b.button(text="← Menu", callback_data="menu:main")
 
-    b.adjust(1)
+    if has_media:
+        b.adjust(2, 2, 2, 2, 1)
+    else:
+        b.adjust(2, 2, 2, 1, 1)
     return b.as_markup()
 
 
@@ -66,11 +69,11 @@ def welcome_timing_keyboard(
     b = InlineKeyboardBuilder()
 
     options = [
-        ("📩 On Request (before approval)", "on_request", 0),
-        ("✅ On Approval (immediately)", "on_approval", 0),
-        ("⏱ 5 min after approval", "delayed", 300),
-        ("⏱ 10 min after approval", "delayed", 600),
-        ("⏱ 30 min after approval", "delayed", 1800),
+        ("📩 On request", "on_request", 0),
+        ("✅ On approval", "on_approval", 0),
+        ("⏱ +5 min", "delayed", 300),
+        ("⏱ +10 min", "delayed", 600),
+        ("⏱ +30 min", "delayed", 1800),
     ]
 
     for label, trigger, delay in options:
@@ -91,10 +94,10 @@ def welcome_timing_keyboard(
     presets = {0, 300, 600, 1800}
     is_custom = current_trigger == "delayed" and current_delay not in presets
     custom_prefix = "✅ " if is_custom else ""
-    b.button(text=f"{custom_prefix}✏️ Custom delay", callback_data=f"welcome:trigger:{chat_id}:custom")
+    b.button(text=f"{custom_prefix}✏️ Custom", callback_data=f"welcome:trigger:{chat_id}:custom")
     b.button(text="← Back", callback_data=f"welcome:edit:{chat_id}")
 
-    b.adjust(1)
+    b.adjust(2, 2, 2, 1, 1)
     return b.as_markup()
 
 
@@ -114,15 +117,15 @@ def welcome_buttons_keyboard(
         else:
             target = "(no target)"
         b.button(
-            text=f"🗑 [{i+1}] {label} → {target}",
+            text=f"🗑{i + 1} {label}",
             callback_data=f"welcome:btn_remove:{chat_id}:{i}",
         )
 
     if len(buttons) < 10:
-        b.button(text="➕ Add Button", callback_data=f"welcome:btn_add:{chat_id}")
+        b.button(text="➕ Add", callback_data=f"welcome:btn_add:{chat_id}")
 
     b.button(text="← Back", callback_data=f"welcome:edit:{chat_id}")
-    b.adjust(1)
+    b.adjust(2)
     return b.as_markup()
 
 
@@ -133,7 +136,7 @@ def welcome_chat_picker_keyboard(chats: List[Dict[str, Any]]) -> InlineKeyboardM
         title = c.get("title", "Chat")
         chat_id = c.get("chat_id")
         b.button(text=f"💬 {title}", callback_data=f"welcome:pick:{chat_id}")
-    b.button(text="← Back", callback_data="menu:main")
-    b.adjust(1)
+    b.button(text="← Menu", callback_data="menu:main")
+    b.adjust(2, 1)
     return b.as_markup()
 
