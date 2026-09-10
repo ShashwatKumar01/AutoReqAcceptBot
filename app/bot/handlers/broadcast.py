@@ -6,6 +6,11 @@ from aiogram.fsm.state import StatesGroup, State
 import uuid
 
 from app.core.utils import build_broadcast_payload
+from app.services.broadcast_status_message import (
+    attach_status_message,
+    format_broadcast_status_text,
+    refresh_broadcast_status_message,
+)
 from ..keyboards.broadcast_menu import broadcast_picker_keyboard, broadcast_confirm_keyboard, broadcast_control_keyboard
 
 class BroadcastStates(StatesGroup):
@@ -125,9 +130,19 @@ async def confirm_broadcast(callback: CallbackQuery, state: FSMContext, broadcas
     })
     
     await state.clear()
-    
-    text = "🚀 Broadcast started!\n\nYou can control it below:"
+
+    job = await broadcast_repo.get_job(job_id) or {
+        "_id": job_id,
+        "status": "running",
+        "sent_count": 0,
+        "failed_count": 0,
+        "total_recipients": estimate,
+    }
+    text = format_broadcast_status_text(job)
     await callback.message.edit_text(text, reply_markup=broadcast_control_keyboard(job_id, "running"))
+    await attach_status_message(
+        broadcast_repo, job_id, callback.message.chat.id, callback.message.message_id,
+    )
     await callback.answer()
 
 @router.callback_query(F.data == 'broadcast:cancel_flow')
@@ -141,22 +156,22 @@ async def cancel_broadcast_flow(callback: CallbackQuery, state: FSMContext):
 async def pause_via_button(callback: CallbackQuery, broadcast_repo):
     job_id = callback.data.split(':')[2]
     await broadcast_repo.update_job_status(job_id, 'paused')
-    await callback.message.edit_reply_markup(reply_markup=broadcast_control_keyboard(job_id, 'paused'))
-    await callback.answer()
+    await refresh_broadcast_status_message(callback.bot, broadcast_repo, job_id)
+    await callback.answer("Paused")
 
 @router.callback_query(F.data.startswith('broadcast:resume:'))
 async def resume_via_button(callback: CallbackQuery, broadcast_repo):
     job_id = callback.data.split(':')[2]
     await broadcast_repo.update_job_status(job_id, 'running')
-    await callback.message.edit_reply_markup(reply_markup=broadcast_control_keyboard(job_id, 'running'))
-    await callback.answer()
+    await refresh_broadcast_status_message(callback.bot, broadcast_repo, job_id)
+    await callback.answer("Resumed")
 
 @router.callback_query(F.data.startswith('broadcast:cancel:'))
 async def cancel_via_button(callback: CallbackQuery, broadcast_repo):
     job_id = callback.data.split(':')[2]
     await broadcast_repo.update_job_status(job_id, 'cancelled')
-    await callback.message.edit_text("Broadcast cancelled.")
-    await callback.answer()
+    await refresh_broadcast_status_message(callback.bot, broadcast_repo, job_id)
+    await callback.answer("Cancelled")
 
 @router.callback_query(F.data.startswith('broadcast:refresh_status:'))
 async def refresh_broadcast_status(callback: CallbackQuery, broadcast_repo):
@@ -164,21 +179,5 @@ async def refresh_broadcast_status(callback: CallbackQuery, broadcast_repo):
     job = await broadcast_repo.get_job(job_id)
     if not job:
         return await callback.answer("Job not found.")
-        
-    status = job.get('status', 'unknown')
-    sent = job.get('sent_count', 0)
-    failed = job.get('failed_count', 0)
-    total = job.get('total_recipients', job.get('total', 1)) or 1
-    
-    text = (
-        f"📊 <b>Broadcast Status</b>\n\n"
-        f"Status: {status}\n"
-        f"Sent: {sent} / {total}\n"
-        f"Failed: {failed}\n"
-    )
-    
-    if status in ['running', 'paused']:
-        await callback.message.edit_text(text, reply_markup=broadcast_control_keyboard(job_id, status))
-    else:
-        await callback.message.edit_text(text)
+    await refresh_broadcast_status_message(callback.bot, broadcast_repo, job_id)
     await callback.answer("Refreshed!")

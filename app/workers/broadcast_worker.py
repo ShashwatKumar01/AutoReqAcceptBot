@@ -4,6 +4,7 @@ from typing import Any, Dict
 import structlog
 from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, TelegramBadRequest, TelegramAPIError
 from app.core.logging import get_logger
+from app.services.broadcast_status_message import refresh_active_broadcast_status_messages, refresh_broadcast_status_message
 
 class BroadcastWorker:
     """
@@ -52,6 +53,9 @@ class BroadcastWorker:
     
     async def _process_running_jobs(self) -> None:
         """Find and process all running jobs."""
+        bot = self.telegram_service.bot
+        await refresh_active_broadcast_status_messages(bot, self.broadcast_repo)
+
         jobs = await self.broadcast_repo.get_running_jobs()
         for job in jobs:
             if not self.running:
@@ -113,6 +117,7 @@ class BroadcastWorker:
             await self.broadcast_repo.update_job_status(
                 job_id, 'completed', {'completed_at': __import__('datetime').datetime.utcnow()}
             )
+            await refresh_broadcast_status_message(self.telegram_service.bot, self.broadcast_repo, job_id)
             self.logger.info('BROADCAST_JOB_NO_RECIPIENTS', job_id=job_id)
             return
 
@@ -122,6 +127,7 @@ class BroadcastWorker:
             await self.broadcast_repo.update_job_status(
                 job_id, 'completed', {'completed_at': __import__('datetime').datetime.utcnow()}
             )
+            await refresh_broadcast_status_message(self.telegram_service.bot, self.broadcast_repo, job_id)
             self.logger.info('BROADCAST_JOB_COMPLETED', job_id=job_id, sent=sent_so_far)
             return
 
@@ -144,6 +150,7 @@ class BroadcastWorker:
             await asyncio.sleep(0.04)
 
         await self.broadcast_repo.update_job_progress(job_id, len(batch), success_count, failure_count)
+        await refresh_broadcast_status_message(self.telegram_service.bot, self.broadcast_repo, job_id)
         self.logger.info(
             'BROADCAST_BATCH_PROCESSED',
             job_id=job_id,

@@ -8,6 +8,7 @@ class ChatRepository:
         self.collection = db['chats']
         self.admins_collection = db['chat_admins']
         self.settings_collection = db['chat_settings']
+        self.relationships_collection = db['user_chat_relationships']
 
     async def upsert_chat(self, chat_data: Dict[str, Any]) -> Dict[str, Any]:
         chat_id = chat_data['chat_id']
@@ -147,8 +148,10 @@ class ChatRepository:
             "welcome_media_type": "",
             "welcome_buttons": [],
             "welcome_parse_mode": "HTML",
+            "welcome_frequency": "every_join",
             # Goodbye
             "goodbye_enabled": False,
+            "goodbye_frequency": "every_leave",
             "goodbye_text": "",
             "goodbye_media_file_id": "",
             "goodbye_media_type": "",
@@ -210,3 +213,35 @@ class ChatRepository:
             "captcha_enabled": current["captcha_enabled"],
         })
         return current
+
+    async def user_received_welcome_once(self, user_id: int, chat_id: int) -> bool:
+        doc = await self.relationships_collection.find_one(
+            {"user_id": user_id, "chat_id": chat_id},
+            {"welcome_delivered": 1},
+        )
+        return bool(doc and doc.get("welcome_delivered"))
+
+    async def mark_welcome_delivered(self, user_id: int, chat_id: int) -> None:
+        now = datetime.now(timezone.utc)
+        await self.relationships_collection.update_one(
+            {"user_id": user_id, "chat_id": chat_id},
+            {"$set": {"welcome_delivered": True, "welcome_delivered_at": now},
+             "$setOnInsert": {"created_at": now}},
+            upsert=True,
+        )
+
+    async def user_received_goodbye_once(self, user_id: int, chat_id: int) -> bool:
+        doc = await self.relationships_collection.find_one(
+            {"user_id": user_id, "chat_id": chat_id},
+            {"goodbye_delivered": 1},
+        )
+        return bool(doc and doc.get("goodbye_delivered"))
+
+    async def mark_goodbye_delivered(self, user_id: int, chat_id: int) -> None:
+        now = datetime.now(timezone.utc)
+        await self.relationships_collection.update_one(
+            {"user_id": user_id, "chat_id": chat_id},
+            {"$set": {"goodbye_delivered": True, "goodbye_delivered_at": now},
+             "$setOnInsert": {"created_at": now}},
+            upsert=True,
+        )

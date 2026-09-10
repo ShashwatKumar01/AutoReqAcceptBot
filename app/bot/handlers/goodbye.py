@@ -75,6 +75,15 @@ async def on_member_left(
     if not text and not media_id:
         return
 
+    frequency = settings.get("goodbye_frequency", "every_leave")
+    if frequency == "once":
+        if await chat_repo.user_received_goodbye_once(user.id, chat_id):
+            logger.info(
+                "Goodbye skipped — once per user",
+                chat_id=chat_id, user_id=user.id,
+            )
+            return
+
     # Substitute variables
     first = user.first_name or ""
     last = user.last_name or ""
@@ -137,6 +146,8 @@ async def on_member_left(
                 chat_id=user.id, text=rendered[:4096],
                 parse_mode="HTML", reply_markup=markup,
             )
+        if frequency == "once":
+            await chat_repo.mark_goodbye_delivered(user.id, chat_id)
         logger.info("Goodbye sent", chat_id=chat_id, user_id=user.id)
     except Exception as e:
         # The user has not started the bot (or blocked it) — Telegram
@@ -157,6 +168,7 @@ async def _get_goodbye_settings(chat_repo, chat_id: int) -> dict:
         "goodbye_media_file_id": raw.get("goodbye_media_file_id", ""),
         "goodbye_media_type": raw.get("goodbye_media_type", ""),
         "goodbye_buttons": raw.get("goodbye_buttons", []),
+        "goodbye_frequency": raw.get("goodbye_frequency", "every_leave"),
     }
 
 
@@ -173,16 +185,17 @@ async def _render_editor(target, chat_repo, chat_id: int, *, edit: bool = False)
         f"🚪 <b>Goodbye Editor — {title}</b>\n\n"
         "Sent to a member's DM when they leave this chat.\n"
         "If they have not /started the bot, Telegram won't let us DM.\n"
-        "✅ marks what's already set."
+        "✅ marks what's already set.\n\n"
+        f"<b>Frequency:</b> {_frequency_label(gs['goodbye_frequency'])}"
     )
 
-    # Reuse welcome_editor_keyboard shape but with prefix 'goodbye:'
     b = _goodbye_editor_keyboard(
         chat_id=chat_id,
         enabled=gs["goodbye_enabled"],
         has_text=bool(gs["goodbye_text"]),
         has_media=bool(gs["goodbye_media_file_id"]),
         btn_count=len(gs["goodbye_buttons"]),
+        frequency=gs["goodbye_frequency"],
     )
 
     if edit:
@@ -190,8 +203,19 @@ async def _render_editor(target, chat_repo, chat_id: int, *, edit: bool = False)
     return await target.answer(body, reply_markup=b)
 
 
+def _frequency_label(freq: str) -> str:
+    if freq == "once":
+        return "Only once per member"
+    return "Every time they leave"
+
+
 def _goodbye_editor_keyboard(
-    chat_id: int, enabled: bool, has_text: bool, has_media: bool, btn_count: int
+    chat_id: int,
+    enabled: bool,
+    has_text: bool,
+    has_media: bool,
+    btn_count: int,
+    frequency: str = "every_leave",
 ) -> InlineKeyboardMarkup:
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     b = InlineKeyboardBuilder()
@@ -209,6 +233,9 @@ def _goodbye_editor_keyboard(
                  callback_data=f"goodbye:remove_media:{chat_id}")
     b.button(text=f"🔘 Buttons ({btn_count})",
              callback_data=f"goodbye:buttons:{chat_id}")
+    freq_label = "Once only" if frequency == "once" else "Every leave"
+    b.button(text=f"🔁 Frequency: {freq_label}",
+             callback_data=f"goodbye:freq_toggle:{chat_id}")
     b.button(text="👁 Preview", callback_data=f"goodbye:preview:{chat_id}")
     b.button(text="← Back to Menu", callback_data="menu:main")
     b.adjust(1)
@@ -277,6 +304,16 @@ async def goodbye_menu(callback: CallbackQuery, chat_repo):
 # ──────────────────────────────────────────────────────────────────────────────
 # Toggle
 # ──────────────────────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("goodbye:freq_toggle:"))
+async def toggle_goodbye_frequency(callback: CallbackQuery, chat_repo):
+    chat_id = int(callback.data.split(":")[2])
+    gs = await _get_goodbye_settings(chat_repo, chat_id)
+    new_freq = "once" if gs["goodbye_frequency"] != "once" else "every_leave"
+    await chat_repo.upsert_settings(chat_id, {"goodbye_frequency": new_freq})
+    await _render_editor(callback.message, chat_repo, chat_id, edit=True)
+    await callback.answer(f"Goodbye: {_frequency_label(new_freq)}")
+
 
 @router.callback_query(F.data.startswith("goodbye:toggle:"))
 async def toggle_goodbye(callback: CallbackQuery, chat_repo):

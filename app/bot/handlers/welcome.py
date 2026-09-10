@@ -38,6 +38,7 @@ async def _get_welcome_settings(chat_repo, chat_id: int) -> dict:
         "welcome_media_type": settings.get("welcome_media_type", ""),
         "welcome_buttons": settings.get("welcome_buttons", []),
         "welcome_parse_mode": settings.get("welcome_parse_mode", "HTML"),
+        "welcome_frequency": settings.get("welcome_frequency", "every_join"),
     }
 
 
@@ -57,6 +58,8 @@ async def _render_editor(target, chat_repo, chat_id: int, *, edit: bool = False)
         "✅ marks what's already set.\n\n"
         "<b>Current timing:</b> "
         + _trigger_summary(ws["welcome_trigger"], ws["welcome_delay_seconds"])
+        + "\n<b>Frequency:</b> "
+        + _welcome_frequency_label(ws["welcome_frequency"])
     )
 
     markup = welcome_editor_keyboard(
@@ -67,11 +70,18 @@ async def _render_editor(target, chat_repo, chat_id: int, *, edit: bool = False)
         btn_count=len(ws["welcome_buttons"]),
         trigger=ws["welcome_trigger"],
         delay=ws["welcome_delay_seconds"],
+        frequency=ws["welcome_frequency"],
     )
 
     if edit:
         return await target.edit_text(body, reply_markup=markup)
     return await target.answer(body, reply_markup=markup)
+
+
+def _welcome_frequency_label(freq: str) -> str:
+    if freq == "once":
+        return "Only once per member (first join)"
+    return "Every time they join"
 
 
 def _trigger_summary(trigger: str, delay: int) -> str:
@@ -253,6 +263,16 @@ async def welcome_edit_callback(callback: CallbackQuery, chat_repo):
 # ──────────────────────────────────────────────────────────────────────────────
 # Toggle enabled
 # ──────────────────────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("welcome:freq_toggle:"))
+async def toggle_welcome_frequency(callback: CallbackQuery, chat_repo):
+    chat_id = int(callback.data.split(":")[2])
+    ws = await _get_welcome_settings(chat_repo, chat_id)
+    new_freq = "once" if ws["welcome_frequency"] != "once" else "every_join"
+    await chat_repo.upsert_settings(chat_id, {"welcome_frequency": new_freq})
+    await _render_editor(callback.message, chat_repo, chat_id, edit=True)
+    await callback.answer(_welcome_frequency_label(new_freq))
+
 
 @router.callback_query(F.data.startswith("welcome:toggle:"))
 async def toggle_welcome(callback: CallbackQuery, chat_repo):

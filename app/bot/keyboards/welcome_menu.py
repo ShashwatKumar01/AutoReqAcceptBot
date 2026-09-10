@@ -25,6 +25,7 @@ def welcome_editor_keyboard(
     btn_count: int,
     trigger: str,
     delay: int,
+    frequency: str = "every_join",
 ) -> InlineKeyboardMarkup:
     """Main welcome editor keyboard."""
     b = InlineKeyboardBuilder()
@@ -45,6 +46,9 @@ def welcome_editor_keyboard(
 
     trigger_label = _trigger_label(trigger, delay)
     b.button(text=f"⏰ Timing: {trigger_label}", callback_data=f"welcome:timing:{chat_id}")
+
+    freq_label = "Once only" if frequency == "once" else "Every join"
+    b.button(text=f"🔁 Frequency: {freq_label}", callback_data=f"welcome:freq_toggle:{chat_id}")
 
     b.button(text="👁 Preview", callback_data=f"welcome:preview:{chat_id}")
     b.button(text="← Back to Menu", callback_data="menu:main")

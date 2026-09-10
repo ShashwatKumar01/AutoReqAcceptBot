@@ -8,6 +8,10 @@ import uuid
 
 from app.core.config import get_settings
 from app.core.utils import build_broadcast_payload
+from app.services.broadcast_status_message import (
+    attach_status_message,
+    format_broadcast_status_text,
+)
 from ..keyboards.superadmin_menu import superadmin_main_keyboard, superadmin_stats_keyboard
 from ..keyboards.broadcast_menu import broadcast_confirm_keyboard, broadcast_control_keyboard
 
@@ -119,10 +123,19 @@ async def master_broadcast_confirm(callback: CallbackQuery, state: FSMContext, b
         "failed_count": 0,
     })
     await state.clear()
+    job = await broadcast_repo.get_job(job_id) or {
+        "_id": job_id,
+        "status": "running",
+        "sent_count": 0,
+        "failed_count": 0,
+        "total_recipients": estimate,
+    }
     await callback.message.edit_text(
-        "🚀 Master broadcast started!\n\n"
-        f"Track progress in the web dashboard:\n<code>{_admin_url()}</code>",
+        format_broadcast_status_text(job),
         reply_markup=broadcast_control_keyboard(job_id, "running"),
+    )
+    await attach_status_message(
+        broadcast_repo, job_id, callback.message.chat.id, callback.message.message_id,
     )
     await callback.answer()
 

@@ -145,6 +145,7 @@ class WelcomeService:
             "welcome_media_type": raw.get("welcome_media_type", "photo"),
             "welcome_buttons": raw.get("welcome_buttons", []),
             "welcome_parse_mode": raw.get("welcome_parse_mode", "HTML"),
+            "welcome_frequency": raw.get("welcome_frequency", "every_join"),
         }
 
     async def _send(
@@ -169,6 +170,15 @@ class WelcomeService:
                 chat_id=chat_id,
             )
             return False
+
+        frequency = ws.get("welcome_frequency", "every_join")
+        if frequency == "once":
+            if await self.chat_repo.user_received_welcome_once(user_id, chat_id):
+                self.logger.info(
+                    "Welcome skipped — once per user",
+                    user_id=user_id, chat_id=chat_id,
+                )
+                return False
 
         bot: Bot | None = getattr(self.telegram_service, "bot", None)
         ok = False
@@ -241,6 +251,8 @@ class WelcomeService:
         if ok:
             try:
                 await self.chat_repo.increment_counter(chat_id, "total_welcome_sent")
+                if ws.get("welcome_frequency", "every_join") == "once":
+                    await self.chat_repo.mark_welcome_delivered(user_id, chat_id)
             except Exception:
                 pass
 
