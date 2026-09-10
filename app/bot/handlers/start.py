@@ -150,9 +150,13 @@ async def main_menu_callback(
 async def admin_panel_from_menu(callback: CallbackQuery, is_super_admin: bool):
     if not is_super_admin:
         return await callback.answer("⛔ Access denied. You are not a super admin.", show_alert=True)
+    from app.core.config import get_settings
     from ..keyboards.superadmin_menu import superadmin_main_keyboard
+    url = get_settings().admin_web_url
     await callback.message.edit_text(
-        "👑 <b>Super Admin Panel</b>\n\nSelect an option to manage the system:",
-        reply_markup=superadmin_main_keyboard()
+        "👑 <b>Super Admin Panel</b>\n\n"
+        "Use the bot panel or open the 🌐 Web Dashboard for full control.\n\n"
+        f"Dashboard: <code>{url}</code>",
+        reply_markup=superadmin_main_keyboard(url),
     )
     await callback.answer()

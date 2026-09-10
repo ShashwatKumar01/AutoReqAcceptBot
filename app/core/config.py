@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     max_connected_chats_free: int = Field(default=3, alias='MAX_CONNECTED_CHATS_FREE')
     max_broadcast_recipients_free: int = Field(default=1000, alias='MAX_BROADCAST_RECIPIENTS_FREE')
 
+    admin_api_secret: str = Field(default='', alias='ADMIN_API_SECRET')
+    admin_web_enabled: bool = Field(default=True, alias='ADMIN_WEB_ENABLED')
+
     model_config = SettingsConfigDict(
         env_file='.env',
         env_file_encoding='utf-8',
@@ -73,6 +76,17 @@ class Settings(BaseSettings):
     @property
     def is_development(self) -> bool:
         return self.environment.lower() == 'development'
+
+    @property
+    def admin_web_url(self) -> str:
+        """Public URL for the super-admin web dashboard."""
+        if self.webhook_url:
+            base = self.webhook_url.rstrip('/')
+            path = (self.webhook_path or '/webhook').rstrip('/')
+            if base.endswith(path):
+                base = base[: -len(path)]
+            return f"{base}/admin/"
+        return f"http://{self.app_host}:{self.app_port}/admin/"
 
 @functools.lru_cache()
 def get_settings() -> Settings:

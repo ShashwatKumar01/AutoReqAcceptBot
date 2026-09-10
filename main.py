@@ -41,10 +41,35 @@ from app.services.welcome_service import WelcomeService
 from app.services.broadcast_service import BroadcastService
 from app.workers.approval_worker import ApprovalWorker
 from app.workers.broadcast_worker import BroadcastWorker
+from app.web.routes import setup_admin_web
 
 
 async def health_check(request: web.Request) -> web.Response:
     return web.json_response({"status": "ok"})
+
+
+def _mount_admin_web(
+    app: web.Application,
+    *,
+    settings,
+    user_repo,
+    chat_repo,
+    join_request_repo,
+    broadcast_repo,
+    db,
+    logger,
+) -> None:
+    setup_admin_web(
+        app,
+        settings=settings,
+        user_repo=user_repo,
+        chat_repo=chat_repo,
+        join_request_repo=join_request_repo,
+        broadcast_repo=broadcast_repo,
+        db=db,
+    )
+    if settings.admin_web_enabled:
+        logger.info("Admin web dashboard mounted", url=settings.admin_web_url)
 
 
 async def main() -> None:
@@ -167,6 +192,16 @@ async def main() -> None:
             )
             webhook_handler.register(app, path=settings.webhook_path)
             app.router.add_get('/health', health_check)
+            _mount_admin_web(
+                app,
+                settings=settings,
+                user_repo=user_repo,
+                chat_repo=chat_repo,
+                join_request_repo=join_request_repo,
+                broadcast_repo=broadcast_repo,
+                db=db,
+                logger=logger,
+            )
             setup_application(app, dp, bot=bot)
 
             runner = web.AppRunner(app)
@@ -195,10 +230,35 @@ async def main() -> None:
         else:
             logger.info("Starting long polling...")
             await bot.delete_webhook(drop_pending_updates=True)
+
+            web_runner = None
+            if settings.admin_web_enabled:
+                admin_app = web.Application()
+                admin_app.router.add_get('/health', health_check)
+                _mount_admin_web(
+                    admin_app,
+                    settings=settings,
+                    user_repo=user_repo,
+                    chat_repo=chat_repo,
+                    join_request_repo=join_request_repo,
+                    broadcast_repo=broadcast_repo,
+                    db=db,
+                    logger=logger,
+                )
+                web_runner = web.AppRunner(admin_app)
+                await web_runner.setup()
+                port = int(os.environ.get('PORT', settings.app_port))
+                site = web.TCPSite(web_runner, host="0.0.0.0", port=port)
+                await site.start()
+                logger.info(f"Admin web server on 0.0.0.0:{port}")
+
             await dp.start_polling(
                 bot,
                 allowed_updates=dp.resolve_used_update_types(),
             )
+
+            if web_runner:
+                await web_runner.cleanup()
 
             # Stop workers on shutdown
             approval_worker.running = False

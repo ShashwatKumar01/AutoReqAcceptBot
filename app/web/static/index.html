@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RequestAcceptBot — Admin</title>
+  <link rel="stylesheet" href="/admin/assets/admin.css" />
+</head>
+<body>
+  <div id="login-screen" class="login-screen hidden">
+    <div class="login-card">
+      <h1>👑 Super Admin</h1>
+      <p>Enter your <code>ADMIN_API_SECRET</code> to access the dashboard.</p>
+      <input id="token-input" type="password" placeholder="API secret" autocomplete="current-password" />
+      <button id="login-btn" class="btn primary">Sign in</button>
+      <p id="login-error" class="error hidden"></p>
+    </div>
+  </div>
+
+  <div id="app" class="app hidden">
+    <aside class="sidebar">
+      <div class="brand">RequestAcceptBot</div>
+      <nav>
+        <button class="nav-btn active" data-tab="dashboard">📊 Dashboard</button>
+        <button class="nav-btn" data-tab="users">👥 Users</button>
+        <button class="nav-btn" data-tab="chats">💬 Chats</button>
+        <button class="nav-btn" data-tab="requests">📨 Join Requests</button>
+        <button class="nav-btn" data-tab="broadcasts">📢 Broadcasts</button>
+        <button class="nav-btn" data-tab="create-broadcast">➕ New Broadcast</button>
+      </nav>
+      <button id="logout-btn" class="btn ghost">Logout</button>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <h2 id="page-title">Dashboard</h2>
+        <button id="refresh-btn" class="btn">🔄 Refresh</button>
+      </header>
+
+      <!-- Dashboard -->
+      <section id="tab-dashboard" class="tab active">
+        <div id="stats-cards" class="cards"></div>
+      </section>
+
+      <!-- Users -->
+      <section id="tab-users" class="tab">
+        <div class="toolbar">
+          <input class="search" data-table="users" placeholder="Search username, name, or ID…" />
+          <select class="filter" data-table="users" data-field="status">
+            <option value="">All statuses</option>
+            <option value="active">active</option>
+            <option value="blocked">blocked</option>
+          </select>
+          <select class="sort" data-table="users">
+            <option value="created_at">Created</option>
+            <option value="telegram_id">Telegram ID</option>
+            <option value="username">Username</option>
+            <option value="last_seen">Last seen</option>
+          </select>
+        </div>
+        <div class="table-wrap"><table id="users-table"><thead></thead><tbody></tbody></table></div>
+        <div class="pager" data-table="users"></div>
+      </section>
+
+      <!-- Chats -->
+      <section id="tab-chats" class="tab">
+        <div class="toolbar">
+          <input class="search" data-table="chats" placeholder="Search title or chat ID…" />
+          <select class="filter" data-table="chats" data-field="status">
+            <option value="">All statuses</option>
+            <option value="connected">connected</option>
+            <option value="disconnected">disconnected</option>
+          </select>
+          <select class="filter" data-table="chats" data-field="type">
+            <option value="">All types</option>
+            <option value="channel">channel</option>
+            <option value="supergroup">supergroup</option>
+            <option value="group">group</option>
+          </select>
+          <select class="sort" data-table="chats">
+            <option value="created_at">Created</option>
+            <option value="title">Title</option>
+            <option value="total_approved">Approved</option>
+          </select>
+        </div>
+        <div class="table-wrap"><table id="chats-table"><thead></thead><tbody></tbody></table></div>
+        <div class="pager" data-table="chats"></div>
+      </section>
+
+      <!-- Join Requests -->
+      <section id="tab-requests" class="tab">
+        <div class="toolbar">
+          <input class="search" data-table="requests" placeholder="Search user/chat ID or username…" />
+          <input class="filter-text" data-table="requests" data-field="chat_id" placeholder="Chat ID filter" />
+          <select class="filter" data-table="requests" data-field="status">
+            <option value="">All statuses</option>
+            <option value="pending">pending</option>
+            <option value="scheduled">scheduled</option>
+            <option value="approved">approved</option>
+            <option value="declined">declined</option>
+          </select>
+          <select class="sort" data-table="requests">
+            <option value="created_at">Created</option>
+            <option value="user_id">User ID</option>
+            <option value="chat_id">Chat ID</option>
+          </select>
+        </div>
+        <div class="table-wrap"><table id="requests-table"><thead></thead><tbody></tbody></table></div>
+        <div class="pager" data-table="requests"></div>
+      </section>
+
+      <!-- Broadcasts -->
+      <section id="tab-broadcasts" class="tab">
+        <div class="toolbar">
+          <select class="filter" data-table="broadcasts" data-field="status">
+            <option value="">All statuses</option>
+            <option value="running">running</option>
+            <option value="paused">paused</option>
+            <option value="completed">completed</option>
+            <option value="cancelled">cancelled</option>
+          </select>
+          <input class="filter-text" data-table="broadcasts" data-field="owner_id" placeholder="Owner ID" />
+          <select class="sort" data-table="broadcasts">
+            <option value="created_at">Created</option>
+            <option value="sent_count">Sent</option>
+            <option value="status">Status</option>
+          </select>
+        </div>
+        <div class="table-wrap"><table id="broadcasts-table"><thead></thead><tbody></tbody></table></div>
+        <div class="pager" data-table="broadcasts"></div>
+        <div id="broadcast-detail" class="detail-panel hidden"></div>
+      </section>
+
+      <!-- Create Broadcast -->
+      <section id="tab-create-broadcast" class="tab">
+        <form id="broadcast-form" class="form-card">
+          <label>Target
+            <select name="target" required>
+              <option value="all_users">All users (master)</option>
+              <option value="all">All channels (owner's chats)</option>
+              <option value="chat">Specific chat ID</option>
+            </select>
+          </label>
+          <label>Chat ID <small>(only for specific chat)</small>
+            <input name="target_id" type="number" placeholder="-1001234567890" />
+          </label>
+          <label>Owner Telegram ID
+            <input name="owner_id" type="number" placeholder="Super admin ID" />
+          </label>
+          <label>Message (HTML supported)
+            <textarea name="text" rows="6" required placeholder="Hello everyone!"></textarea>
+          </label>
+          <button type="submit" class="btn primary">🚀 Start Broadcast</button>
+          <p id="broadcast-form-msg" class="msg hidden"></p>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <script src="/admin/assets/admin.js"></script>
+</body>
+</html>
