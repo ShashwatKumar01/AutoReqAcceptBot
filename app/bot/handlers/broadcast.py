@@ -6,6 +6,11 @@ from aiogram.fsm.state import StatesGroup, State
 import uuid
 
 from app.core.utils import build_broadcast_payload
+from app.core.config import get_settings
+from app.services.broadcast_admin_notify import (
+    notify_broadcast_finished_if_needed,
+    notify_broadcast_started,
+)
 from app.services.broadcast_status_message import (
     attach_status_message,
     format_broadcast_status_text,
@@ -143,6 +148,15 @@ async def confirm_broadcast(callback: CallbackQuery, state: FSMContext, broadcas
     await attach_status_message(
         broadcast_repo, job_id, callback.message.chat.id, callback.message.message_id,
     )
+    job_row = await broadcast_repo.get_job(job_id) or {
+        "_id": job_id,
+        "target": target,
+        "target_id": target_id,
+        "total_recipients": estimate,
+    }
+    await notify_broadcast_started(
+        callback.bot, get_settings(), job_row, callback.from_user.id,
+    )
     await callback.answer()
 
 @router.callback_query(F.data == 'broadcast:cancel_flow')
@@ -171,6 +185,9 @@ async def cancel_via_button(callback: CallbackQuery, broadcast_repo):
     job_id = callback.data.split(':')[2]
     await broadcast_repo.update_job_status(job_id, 'cancelled')
     await refresh_broadcast_status_message(callback.bot, broadcast_repo, job_id)
+    await notify_broadcast_finished_if_needed(
+        callback.bot, get_settings(), broadcast_repo, job_id,
+    )
     await callback.answer("Cancelled")
 
 @router.callback_query(F.data.startswith('broadcast:refresh_status:'))

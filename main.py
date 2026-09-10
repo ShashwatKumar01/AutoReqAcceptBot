@@ -59,6 +59,8 @@ def _mount_admin_web(
     db,
     logger,
     bot_info: dict | None = None,
+    bot: Bot | None = None,
+    redis_client=None,
 ) -> None:
     setup_admin_web(
         app,
@@ -69,6 +71,8 @@ def _mount_admin_web(
         broadcast_repo=broadcast_repo,
         db=db,
         bot_info=bot_info,
+        bot=bot,
+        redis_client=redis_client,
     )
     if settings.admin_web_enabled:
         logger.info("Admin web dashboard mounted", url=settings.admin_web_url)
@@ -113,6 +117,7 @@ async def main() -> None:
         join_request_repo_class=JoinRequestRepository,
         broadcast_repo_class=BroadcastRepository,
         subscription_repo_class=SubscriptionRepository,
+        redis_client=redis_client,
     )
     dp.update.outer_middleware(db_middleware)
     dp.update.outer_middleware(AuthMiddleware(settings.super_admin_id_list))
@@ -212,6 +217,8 @@ async def main() -> None:
                 db=db,
                 logger=logger,
                 bot_info=bot_info_doc,
+                bot=bot,
+                redis_client=redis_client,
             )
             setup_application(app, dp, bot=bot)
 
@@ -256,6 +263,8 @@ async def main() -> None:
                     db=db,
                     logger=logger,
                     bot_info=bot_info_doc,
+                    bot=bot,
+                    redis_client=redis_client,
                 )
                 web_runner = web.AppRunner(admin_app)
                 await web_runner.setup()

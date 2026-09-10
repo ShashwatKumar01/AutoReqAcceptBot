@@ -1,46 +1,69 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
 import uuid
 
+from app.web.services.system_health import check_system_health
 from app.web.utils import serialize_doc, broadcast_progress, mask_bot_token
 
 
 class AdminQueryService:
-    def __init__(self, user_repo, chat_repo, join_request_repo, broadcast_repo, db):
+    def __init__(self, user_repo, chat_repo, join_request_repo, broadcast_repo, db, redis_client=None):
         self.user_repo = user_repo
         self.chat_repo = chat_repo
         self.join_request_repo = join_request_repo
         self.broadcast_repo = broadcast_repo
         self.db = db
+        self.redis_client = redis_client
+
+    async def _system_health(self) -> dict[str, Any]:
+        return await check_system_health(self.db, self.redis_client)
 
     async def overview(self) -> dict:
         now = datetime.now(timezone.utc)
         week_ago = now - timedelta(days=7)
         day_ago = now - timedelta(days=1)
 
-        users_total = await self.user_repo.count()
-        users_active = await self.user_repo.count_by_status('active')
-        users_new_week = await self.user_repo.count_new_since(week_ago)
-        users_new_day = await self.user_repo.count_new_since(day_ago)
-
-        chats_total = await self.chat_repo.count()
-        chats_connected = await self.chat_repo.count_by_status('connected')
-        chats_channel = await self.chat_repo.count_by_type('channel')
-        chats_group = await self.chat_repo.collection.count_documents(
-            {"type": {"$in": ["group", "supergroup"]}}
-        )
-
         jr = self.join_request_repo.collection
-        join_total = await jr.count_documents({})
-        join_approved = await jr.count_documents({"status": "approved"})
-        join_pending = await jr.count_documents({"status": {"$in": ["pending", "scheduled"]}})
-        join_declined = await jr.count_documents({"status": "declined"})
-
         bj = self.broadcast_repo.collection
-        broadcast_running = await bj.count_documents({"status": "running"})
-        broadcast_paused = await bj.count_documents({"status": "paused"})
-        broadcast_completed = await bj.count_documents({"status": "completed"})
-        broadcast_total = await bj.count_documents({})
+
+        (
+            users_total,
+            users_active,
+            users_new_week,
+            users_new_day,
+            chats_total,
+            chats_connected,
+            chats_channel,
+            chats_group,
+            join_total,
+            join_approved,
+            join_pending,
+            join_declined,
+            broadcast_running,
+            broadcast_paused,
+            broadcast_completed,
+            broadcast_total,
+            system,
+        ) = await asyncio.gather(
+            self.user_repo.count(),
+            self.user_repo.count_by_status('active'),
+            self.user_repo.count_new_since(week_ago),
+            self.user_repo.count_new_since(day_ago),
+            self.chat_repo.count(),
+            self.chat_repo.count_by_status('connected'),
+            self.chat_repo.count_by_type('channel'),
+            self.chat_repo.collection.count_documents({"type": {"$in": ["group", "supergroup"]}}),
+            jr.count_documents({}),
+            jr.count_documents({"status": "approved"}),
+            jr.count_documents({"status": {"$in": ["pending", "scheduled"]}}),
+            jr.count_documents({"status": "declined"}),
+            bj.count_documents({"status": "running"}),
+            bj.count_documents({"status": "paused"}),
+            bj.count_documents({"status": "completed"}),
+            bj.count_documents({}),
+            self._system_health(),
+        )
 
         return {
             "users": {
@@ -67,6 +90,7 @@ class AdminQueryService:
                 "paused": broadcast_paused,
                 "completed": broadcast_completed,
             },
+            "system": system,
             "generated_at": now.isoformat(),
         }
 

@@ -1,6 +1,10 @@
 import json
 from aiohttp import web
 
+from app.services.broadcast_admin_notify import (
+    notify_broadcast_finished_if_needed,
+    notify_broadcast_started,
+)
 from app.web.utils import parse_pagination
 
 
@@ -81,6 +85,12 @@ async def create_broadcast(request: web.Request) -> web.Response:
         target=job.get('id', ''),
         payload=body,
     )
+    bot = request.app.get('bot')
+    job_id = job.get('id', '')
+    if bot and job_id:
+        repo = request.app['admin_query'].broadcast_repo
+        row = await repo.get_job(job_id) or {'_id': job_id, **job}
+        await notify_broadcast_started(bot, request.app['settings'], row, owner_id)
     return web.json_response(job, status=201)
 
 
@@ -107,6 +117,14 @@ async def patch_broadcast(request: web.Request) -> web.Response:
         payload=body,
     )
     job = await request.app['admin_query'].get_broadcast(job_id)
+    bot = request.app.get('bot')
+    if bot and action == 'cancel':
+        await notify_broadcast_finished_if_needed(
+            bot,
+            request.app['settings'],
+            request.app['admin_query'].broadcast_repo,
+            job_id,
+        )
     return web.json_response(job)
 
 

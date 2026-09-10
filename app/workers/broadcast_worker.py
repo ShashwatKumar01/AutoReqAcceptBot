@@ -4,6 +4,8 @@ from typing import Any, Dict
 import structlog
 from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, TelegramBadRequest, TelegramAPIError
 from app.core.logging import get_logger
+from app.core.config import get_settings
+from app.services.broadcast_admin_notify import notify_broadcast_finished_if_needed
 from app.services.broadcast_status_message import refresh_active_broadcast_status_messages, refresh_broadcast_status_message
 
 class BroadcastWorker:
@@ -118,6 +120,9 @@ class BroadcastWorker:
                 job_id, 'completed', {'completed_at': __import__('datetime').datetime.utcnow()}
             )
             await refresh_broadcast_status_message(self.telegram_service.bot, self.broadcast_repo, job_id)
+            await notify_broadcast_finished_if_needed(
+                self.telegram_service.bot, get_settings(), self.broadcast_repo, job_id,
+            )
             self.logger.info('BROADCAST_JOB_NO_RECIPIENTS', job_id=job_id)
             return
 
@@ -128,6 +133,9 @@ class BroadcastWorker:
                 job_id, 'completed', {'completed_at': __import__('datetime').datetime.utcnow()}
             )
             await refresh_broadcast_status_message(self.telegram_service.bot, self.broadcast_repo, job_id)
+            await notify_broadcast_finished_if_needed(
+                self.telegram_service.bot, get_settings(), self.broadcast_repo, job_id,
+            )
             self.logger.info('BROADCAST_JOB_COMPLETED', job_id=job_id, sent=sent_so_far)
             return
 

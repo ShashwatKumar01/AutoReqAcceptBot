@@ -6,12 +6,20 @@ from ..keyboards.main_menu import main_menu_keyboard, welcome_start_keyboard
 from ..keyboards.help_menu import help_keyboard
 from ..keyboards.styled import STYLE_PRIMARY
 from ..texts.help_content import build_help_text
+from app.core.config import get_settings
 
 router = Router()
 
 _START_HINT = (
     "\n\n📖 New? See <b>/tutorial</b> for setup.\n"
     "📋 All commands: <b>/help</b>"
+)
+
+_SUPER_ADMIN_START = (
+    "\n\n👑 <b>Super admin</b>\n"
+    "• <b>/admin</b> — panel & web dashboard\n"
+    "• <b>/master_broadcast</b> — message all bot users\n"
+    "• Broadcast start & finish alerts are sent here in DM"
 )
 
 
@@ -82,6 +90,10 @@ async def start_handler(
             "Add another or open the menu to configure."
             f"{_START_HINT}"
         )
+    if is_super_admin:
+        text += _SUPER_ADMIN_START
+        url = get_settings().admin_web_url
+        text += f"\n🌐 Web: <code>{url}</code>"
     await message.answer(text, reply_markup=_start_keyboard(has_chats, bot_username, is_super_admin))
 
 

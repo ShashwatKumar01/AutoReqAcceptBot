@@ -15,19 +15,22 @@ async def admin_index(_request: web.Request) -> web.Response:
 
 
 def setup_admin_web(app: web.Application, *, settings, user_repo, chat_repo,
-                    join_request_repo, broadcast_repo, db, bot_info: dict | None = None) -> None:
+                    join_request_repo, broadcast_repo, db, bot_info: dict | None = None,
+                    bot=None, redis_client=None) -> None:
     """Mount super-admin dashboard static files and REST API."""
     if not settings.admin_web_enabled:
         return
 
     app['settings'] = settings
     app['bot_info'] = bot_info
+    app['bot'] = bot
     app['admin_query'] = AdminQueryService(
         user_repo=user_repo,
         chat_repo=chat_repo,
         join_request_repo=join_request_repo,
         broadcast_repo=broadcast_repo,
         db=db,
+        redis_client=redis_client,
     )
 
     app.middlewares.insert(0, admin_auth_middleware)

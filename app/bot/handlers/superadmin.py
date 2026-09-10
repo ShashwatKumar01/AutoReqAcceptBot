@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 import uuid
 
 from app.core.config import get_settings
+from app.web.services.system_health import check_system_health
 from app.core.utils import build_broadcast_payload
+from app.services.broadcast_admin_notify import notify_broadcast_started
 from app.services.broadcast_status_message import (
     attach_status_message,
     format_broadcast_status_text,
@@ -37,6 +39,21 @@ def _admin_url() -> str:
     return get_settings().admin_web_url
 
 
+async def _format_system_health(db, redis_client) -> str:
+    health = await check_system_health(db, redis_client)
+    mongo = health["mongodb"]
+    redis = health["redis"]
+    uses = ", ".join(health.get("redis_used_for") or [])
+    return (
+        "🖥 <b>System Health</b>\n\n"
+        f"<b>MongoDB:</b> {mongo}\n"
+        f"<b>Redis:</b> {redis} <i>(in use if online)</i>\n"
+        f"<b>Workers:</b> approval + broadcast in-process\n\n"
+        f"<b>Redis roles:</b> {uses}\n\n"
+        f"Web dashboard: <code>{_admin_url()}</code>"
+    )
+
+
 @router.message(Command('admin'))
 async def admin_panel(message: Message):
     await message.answer(
@@ -61,14 +78,8 @@ async def chats_stats(message: Message, chat_repo):
 
 
 @router.message(Command('system'))
-async def system_stats(message: Message):
-    text = (
-        "🖥 <b>System Health</b>\n\n"
-        "Database: Connected\n"
-        "Redis: Connected\n"
-        "Workers: Running in-process\n\n"
-        f"Web dashboard: <code>{_admin_url()}</code>"
-    )
+async def system_stats(message: Message, db, redis_client):
+    text = await _format_system_health(db, redis_client)
     await message.answer(text, reply_markup=superadmin_stats_keyboard())
 
 
@@ -137,12 +148,20 @@ async def master_broadcast_confirm(callback: CallbackQuery, state: FSMContext, b
     await attach_status_message(
         broadcast_repo, job_id, callback.message.chat.id, callback.message.message_id,
     )
+    job_row = await broadcast_repo.get_job(job_id) or {
+        "_id": job_id,
+        "target": "all_users",
+        "total_recipients": estimate,
+    }
+    await notify_broadcast_started(
+        callback.bot, get_settings(), job_row, callback.from_user.id,
+    )
     await callback.answer()
 
 
 @router.callback_query(F.data == 'menu:admin')
 @router.callback_query(F.data.startswith('admin:'))
-async def admin_callbacks(callback: CallbackQuery, state: FSMContext, user_repo, chat_repo):
+async def admin_callbacks(callback: CallbackQuery, state: FSMContext, user_repo, chat_repo, db, redis_client):
     if callback.data == 'menu:admin':
         action = 'main'
     else:
@@ -192,13 +211,7 @@ async def admin_callbacks(callback: CallbackQuery, state: FSMContext, user_repo,
             reply_markup=superadmin_stats_keyboard(),
         )
     elif action == 'system':
-        text = (
-            "🖥 <b>System Health</b>\n\n"
-            "Database: Connected\n"
-            "Redis: Connected\n"
-            "Workers: Running in-process\n\n"
-            f"Dashboard: <code>{url}</code>"
-        )
+        text = await _format_system_health(db, redis_client)
         await callback.message.edit_text(text, reply_markup=superadmin_stats_keyboard())
     elif action == 'stats':
         if len(callback.data.split(':')) > 2 and callback.data.split(':')[2] == 'refresh':

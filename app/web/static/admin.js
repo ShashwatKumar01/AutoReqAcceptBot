@@ -72,8 +72,16 @@ async function loadCurrentTab() {
   }
 }
 
+function systemPill(status) {
+  const ok = status === 'online';
+  const label = status === 'not_configured' ? 'n/a' : status;
+  return `<span class="status-pill ${ok ? 'status-running' : 'status-cancelled'}">${label}</span>`;
+}
+
 function renderCards(stats) {
   const el = $('#stats-cards');
+  const sys = stats.system || {};
+  const redisUses = (sys.redis_used_for || []).join(' · ');
   el.innerHTML = `
     <div class="card"><h3>Users</h3><div class="value">${stats.users.total}</div>
       <div class="sub">${stats.users.active} active · +${stats.users.new_today} today</div></div>
@@ -83,16 +91,28 @@ function renderCards(stats) {
       <div class="sub">${stats.join_requests.approved} approved · ${stats.join_requests.pending} pending</div></div>
     <div class="card"><h3>Broadcasts</h3><div class="value">${stats.broadcasts.total}</div>
       <div class="sub">${stats.broadcasts.running} running · ${stats.broadcasts.paused} paused</div></div>
+    <div class="card"><h3>System</h3>
+      <div class="sub">MongoDB ${systemPill(sys.mongodb)} · Redis ${systemPill(sys.redis)}</div>
+      <div class="sub" style="margin-top:.35rem;font-size:.8rem">${esc(redisUses)}</div></div>
   `;
 }
 
-async function loadDashboard() {
-  const [stats, bot] = await Promise.all([
-    api('/api/admin/stats'),
-    api('/api/admin/bot').catch(() => null),
-  ]);
-  renderCards(stats);
-  renderBotStrip(bot);
+let botInfoCache = null;
+
+async function loadDashboard(includeBot = true) {
+  if (includeBot) {
+    const [stats, bot] = await Promise.all([
+      api('/api/admin/stats'),
+      api('/api/admin/bot').catch(() => null),
+    ]);
+    renderCards(stats);
+    botInfoCache = bot;
+    renderBotStrip(botInfoCache);
+  } else {
+    const stats = await api('/api/admin/stats');
+    renderCards(stats);
+    if (botInfoCache) renderBotStrip(botInfoCache);
+  }
 }
 
 function renderBotStrip(bot) {
@@ -496,10 +516,13 @@ async function init() {
     showLogin();
   }
 
-  // Auto-refresh broadcasts tab every 10s
+  // Live refresh: broadcasts every 10s; dashboard stats every 30s (lighter on Mongo/Redis)
   setInterval(() => {
-    if (state.tab === 'broadcasts' || state.tab === 'dashboard') loadCurrentTab();
+    if (state.tab === 'broadcasts') loadBroadcasts();
   }, 10000);
+  setInterval(() => {
+    if (state.tab === 'dashboard') loadDashboard(false);
+  }, 30000);
 }
 
 init();
