@@ -53,6 +53,9 @@ logs/
 # Railway
 .railway/
 
+# Local Mongo exports (scripts/mongo_backup.py)
+backups/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -50,6 +50,16 @@ def parse_pagination(request, default_limit: int = 25, max_limit: int = 100) -> 
     }
 
 
+def mask_bot_token(token: str) -> str:
+    """Show token prefix/suffix only (full token available via admin API on request)."""
+    token = (token or "").strip()
+    if not token:
+        return ""
+    if len(token) <= 12:
+        return "••••••••"
+    return f"{token[:10]}…{token[-6:]}"
+
+
 def broadcast_progress(job: dict) -> dict:
     sent = int(job.get('sent_count') or 0)
     failed = int(job.get('failed_count') or 0)

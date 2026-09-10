@@ -58,6 +58,7 @@ def _mount_admin_web(
     broadcast_repo,
     db,
     logger,
+    bot_info: dict | None = None,
 ) -> None:
     setup_admin_web(
         app,
@@ -67,6 +68,7 @@ def _mount_admin_web(
         join_request_repo=join_request_repo,
         broadcast_repo=broadcast_repo,
         db=db,
+        bot_info=bot_info,
     )
     if settings.admin_web_enabled:
         logger.info("Admin web dashboard mounted", url=settings.admin_web_url)
@@ -86,8 +88,16 @@ async def main() -> None:
     storage = RedisStorage(redis=redis_client)
 
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode='HTML'))
-    bot_info = await bot.get_me()
-    bot_username = bot_info.username or ""
+    bot_me = await bot.get_me()
+    bot_username = bot_me.username or ""
+    bot_info_doc = {
+        "id": bot_me.id,
+        "username": bot_me.username,
+        "first_name": bot_me.first_name,
+        "can_join_groups": bot_me.can_join_groups,
+        "can_read_all_group_messages": bot_me.can_read_all_group_messages,
+        "supports_inline_queries": bot_me.supports_inline_queries,
+    }
 
     dp = Dispatcher(storage=storage)
 
@@ -201,6 +211,7 @@ async def main() -> None:
                 broadcast_repo=broadcast_repo,
                 db=db,
                 logger=logger,
+                bot_info=bot_info_doc,
             )
             setup_application(app, dp, bot=bot)
 
@@ -244,6 +255,7 @@ async def main() -> None:
                     broadcast_repo=broadcast_repo,
                     db=db,
                     logger=logger,
+                    bot_info=bot_info_doc,
                 )
                 web_runner = web.AppRunner(admin_app)
                 await web_runner.setup()

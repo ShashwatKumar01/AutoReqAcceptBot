@@ -3,8 +3,15 @@ from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..keyboards.main_menu import main_menu_keyboard, welcome_start_keyboard
+from ..keyboards.help_menu import help_keyboard
+from ..texts.help_content import build_help_text
 
 router = Router()
+
+_START_HINT = (
+    "\n\n📖 New? See <b>/tutorial</b> for setup.\n"
+    "📋 All commands: <b>/help</b>"
+)
 
 
 def _start_keyboard(has_chats: bool, bot_username: str, is_super_admin: bool):
@@ -59,15 +66,16 @@ async def start_handler(
     if not has_chats:
         text = (
             "👋 <b>Welcome to Auto Request Manager!</b>\n\n"
-            "I can automatically accept join requests to your Telegram groups "
-            "and channels and DM new members a welcome message (with photos, "
-            "videos, and premium emoji).\n\n"
-            "<b>To get started, add me to a group or channel:</b>"
+            "I automatically <b>approve join requests</b> for your groups and channels "
+            "and can <b>DM welcome messages</b> (text, media, buttons).\n\n"
+            "<b>To get started, add me as admin:</b>"
+            f"{_START_HINT}"
         )
     else:
         text = (
             f"👋 You're connected to <b>{len(chats)}</b> chat(s).\n"
-            "Add another one or open the menu to configure."
+            "Add another or open the menu to configure."
+            f"{_START_HINT}"
         )
     await message.answer(text, reply_markup=_start_keyboard(has_chats, bot_username, is_super_admin))
 
@@ -95,30 +103,25 @@ async def menu_command(message: Message, chat_repo, is_super_admin: bool):
     )
     await message.answer(text, reply_markup=main_menu_keyboard(is_super_admin=is_super_admin))
 
-@router.message(Command('help'))
-async def help_handler(message: Message):
-    """Show help text with all commands."""
-    help_text = (
-        "❓ <b>Bot Help</b>\n\n"
-        "<b>Commands:</b>\n"
-        "/start - Start the bot (shows Add buttons)\n"
-        "/menu - Open the full main menu\n"
-        "/help - Show this help message\n"
-        "/tutorial - View the setup tutorial\n"
-        "/mychannels - List your connected chats\n"
-        "/settings - Bot settings (= main menu)\n"
-        "/welcome - Configure welcome message\n"
-        "/goodbye - Configure goodbye message\n"
-        "/stats - View statistics\n"
-        "/broadcast - Send broadcast message\n"
-        "/plan - View your plan\n"
-        "/connect <chat_id> - Manually connect a chat by id\n"
-        "/disconnect <chat_id> - Disconnect a chat by id\n"
-        "/captcha on|off - Toggle captcha verification (admins only)\n\n"
-        "<b>Tip:</b> Forward any message from a channel/group to this bot "
-        "and I'll show its connection details."
+async def _reply_help(target: Message, is_super_admin: bool) -> None:
+    await target.answer(
+        build_help_text(is_super_admin=is_super_admin),
+        reply_markup=help_keyboard(),
     )
-    await message.answer(help_text)
+
+
+@router.message(Command("help"))
+async def help_command(message: Message, is_super_admin: bool = False):
+    await _reply_help(message, is_super_admin)
+
+
+@router.callback_query(F.data == "menu:help")
+async def help_menu_callback(callback: CallbackQuery, is_super_admin: bool = False):
+    await callback.message.edit_text(
+        build_help_text(is_super_admin=is_super_admin),
+        reply_markup=help_keyboard(),
+    )
+    await callback.answer()
 
 @router.callback_query(F.data == 'menu:main')
 async def main_menu_callback(

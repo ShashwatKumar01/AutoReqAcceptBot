@@ -1,0 +1,43 @@
+# Periodic MongoDB backup for AutoReqAcceptBot.
+# Setup: GitHub repo → Settings → Secrets → Actions
+#   MONGODB_URI — must be reachable from GitHub (Railway public Mongo URL or Atlas).
+#   MONGODB_DATABASE — optional, default request_accept_bot
+#
+# Manual run: Actions → Mongo backup → Run workflow
+
+name: Mongo backup
+
+on:
+  schedule:
+    - cron: "0 4 * * *" # daily 04:00 UTC
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install pymongo python-dotenv
+
+      - name: Export database
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          MONGODB_DATABASE: ${{ secrets.MONGODB_DATABASE }}
+          BACKUP_DIR: backup_out
+        run: python scripts/mongo_backup.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mongo-backup-${{ github.run_number }}
+          path: backup_out/*.tar.gz
+          retention-days: 90
+          if-no-files-found: error

@@ -21,6 +21,25 @@ async def list_chats(request: web.Request) -> web.Response:
     return web.json_response(data)
 
 
+async def get_chat(request: web.Request) -> web.Response:
+    raw = request.match_info['chat_id']
+    try:
+        chat_id = int(raw)
+    except ValueError:
+        return web.json_response({'error': 'Invalid chat_id'}, status=400)
+    data = await request.app['admin_query'].get_chat(chat_id)
+    if not data:
+        return web.json_response({'error': 'Not found'}, status=404)
+    return web.json_response(data)
+
+
+async def bot_info(request: web.Request) -> web.Response:
+    settings = request.app['settings']
+    bot_info_doc = request.app.get('bot_info')
+    data = await request.app['admin_query'].bot_info(settings, bot_info_doc)
+    return web.json_response(data)
+
+
 async def list_join_requests(request: web.Request) -> web.Response:
     params = parse_pagination(request)
     data = await request.app['admin_query'].list_join_requests(params)
@@ -95,6 +114,8 @@ def setup_api_routes(app: web.Application) -> None:
     app.router.add_get('/api/admin/stats', stats_overview)
     app.router.add_get('/api/admin/users', list_users)
     app.router.add_get('/api/admin/chats', list_chats)
+    app.router.add_get('/api/admin/chats/{chat_id}', get_chat)
+    app.router.add_get('/api/admin/bot', bot_info)
     app.router.add_get('/api/admin/join-requests', list_join_requests)
     app.router.add_get('/api/admin/broadcasts', list_broadcasts)
     app.router.add_get('/api/admin/broadcasts/{job_id}', get_broadcast)

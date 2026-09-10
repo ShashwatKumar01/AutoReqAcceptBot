@@ -48,8 +48,9 @@ function switchTab(name) {
   if (panel) panel.classList.add('active');
   const titles = {
     dashboard: 'Dashboard',
+    bot: 'Bot',
     users: 'Users',
-    chats: 'Chats',
+    chats: 'Chats & settings',
     requests: 'Join Requests',
     broadcasts: 'Broadcasts',
     'create-broadcast': 'New Broadcast',
@@ -61,6 +62,7 @@ function switchTab(name) {
 async function loadCurrentTab() {
   try {
     if (state.tab === 'dashboard') await loadDashboard();
+    else if (state.tab === 'bot') await loadBot();
     else if (state.tab === 'users') await loadUsers();
     else if (state.tab === 'chats') await loadChats();
     else if (state.tab === 'requests') await loadRequests();
@@ -85,8 +87,133 @@ function renderCards(stats) {
 }
 
 async function loadDashboard() {
-  const stats = await api('/api/admin/stats');
+  const [stats, bot] = await Promise.all([
+    api('/api/admin/stats'),
+    api('/api/admin/bot').catch(() => null),
+  ]);
   renderCards(stats);
+  renderBotStrip(bot);
+}
+
+function renderBotStrip(bot) {
+  const el = $('#dashboard-bot-strip');
+  if (!el) return;
+  if (!bot) {
+    el.innerHTML = '';
+    return;
+  }
+  const tg = bot.telegram || {};
+  const name = tg.first_name || 'Bot';
+  const user = tg.username ? `@${tg.username}` : '—';
+  el.innerHTML = `
+    <strong>${esc(name)}</strong> (${esc(user)}) · ID <code>${tg.id || '—'}</code>
+    · Token: <code>${esc(bot.token_masked || '—')}</code>
+    <button type="button" class="btn sm" id="dash-bot-more">Full bot info</button>
+  `;
+  $('#dash-bot-more')?.addEventListener('click', () => switchTab('bot'));
+}
+
+function renderBotDetail(bot) {
+  const el = $('#bot-detail');
+  if (!el) return;
+  const tg = bot.telegram || {};
+  const dep = bot.deployment || {};
+  el.innerHTML = `
+    <h3>🤖 ${esc(tg.first_name || 'Bot')} ${tg.username ? `(@${esc(tg.username)})` : ''}</h3>
+    <div class="settings-grid">
+      <div class="kv"><b>Telegram bot ID</b>${tg.id ?? '—'}</div>
+      <div class="kv"><b>Username</b>${tg.username ? `@${esc(tg.username)}` : '—'}</div>
+      <div class="kv"><b>Environment</b>${esc(dep.environment || '—')}</div>
+      <div class="kv"><b>Webhook URL</b>${esc(dep.webhook_url || '—')}</div>
+      <div class="kv"><b>Admin panel</b>${esc(dep.admin_web_url || '—')}</div>
+      <div class="kv"><b>Super admin IDs</b>${(bot.super_admin_ids || []).join(', ') || '—'}</div>
+    </div>
+    <h4>BOT_TOKEN</h4>
+    <div class="token-row">
+      <code id="bot-token-value">${esc(bot.bot_token || bot.token_masked || 'not set')}</code>
+      ${bot.bot_token ? '<button type="button" class="btn sm" id="copy-bot-token">Copy</button>' : ''}
+    </div>
+    <p style="color:var(--muted);font-size:.85rem">Keep this secret — only share with trusted admins.</p>
+  `;
+  $('#copy-bot-token')?.addEventListener('click', () => {
+    navigator.clipboard?.writeText(bot.bot_token);
+  });
+}
+
+async function loadBot() {
+  const bot = await api('/api/admin/bot');
+  renderBotDetail(bot);
+}
+
+function renderButtonsList(buttons) {
+  if (!buttons || !buttons.length) return '<em style="color:var(--muted)">No buttons</em>';
+  return `<ul class="btn-list">${buttons.map((b, i) =>
+    `<li>${i + 1}. <strong>${esc(b.text || '?')}</strong> → ${esc(b.url || b.callback_data || '—')}</li>`
+  ).join('')}</ul>`;
+}
+
+function renderChatDetail(data) {
+  const c = data.chat || {};
+  const w = data.welcome || {};
+  const g = data.goodbye || {};
+  const a = data.approval || {};
+  const panel = $('#chat-detail');
+  panel.classList.remove('hidden');
+  panel.innerHTML = `
+    <h3>💬 ${esc(c.title || 'Chat')} <code>${c.chat_id}</code></h3>
+    <button type="button" class="btn sm" id="chat-detail-close">Close</button>
+    <div class="settings-grid">
+      <div class="kv"><b>Chat ID</b><code>${c.chat_id}</code></div>
+      <div class="kv"><b>Type</b>${esc(c.type || '—')}</div>
+      <div class="kv"><b>Status</b>${statusPill(c.status || 'unknown')}</div>
+      <div class="kv"><b>Owner admin ID</b>${c.admin_id ?? '—'}</div>
+      <div class="kv"><b>Linked admin IDs</b>${(data.admin_user_ids || []).join(', ') || '—'}</div>
+      <div class="kv"><b>Approved members</b>${c.total_approved ?? 0}</div>
+      <div class="kv"><b>Join requests</b>${c.total_join_requests ?? 0}</div>
+      <div class="kv"><b>Welcome sent</b>${c.total_welcome_sent ?? 0}</div>
+    </div>
+
+    <h4>Auto-approve</h4>
+    <div class="settings-grid">
+      <div class="kv"><b>Enabled</b>${a.enabled ? '✅ ON' : '❌ OFF'}</div>
+      <div class="kv"><b>Delay (sec)</b>${a.delay ?? 0}</div>
+      <div class="kv"><b>Captcha</b>${a.captcha_enabled ? 'ON' : 'OFF'}</div>
+    </div>
+
+    <h4>Welcome message</h4>
+    <div class="settings-grid">
+      <div class="kv"><b>Enabled</b>${w.enabled ? '✅ ON' : '❌ OFF'}</div>
+      <div class="kv"><b>Trigger</b>${esc(w.trigger)}</div>
+      <div class="kv"><b>Delay (sec)</b>${w.delay_seconds ?? 0}</div>
+      <div class="kv"><b>Frequency</b>${esc(w.frequency)}</div>
+      <div class="kv"><b>Media</b>${w.media_file_id ? `${esc(w.media_type)} (file_id set)` : '—'}</div>
+    </div>
+    <p><b>Text</b></p>
+    <pre class="settings-pre">${esc(w.text || '(empty)')}</pre>
+    <p><b>Buttons (${(w.buttons || []).length})</b></p>
+    ${renderButtonsList(w.buttons)}
+
+    <h4>Goodbye message</h4>
+    <div class="settings-grid">
+      <div class="kv"><b>Enabled</b>${g.enabled ? '✅ ON' : '❌ OFF'}</div>
+      <div class="kv"><b>Frequency</b>${esc(g.frequency)}</div>
+      <div class="kv"><b>Media</b>${g.media_file_id ? `${esc(g.media_type)} (file_id set)` : '—'}</div>
+    </div>
+    <p><b>Text</b></p>
+    <pre class="settings-pre">${esc(g.text || '(empty)')}</pre>
+    <p><b>Buttons (${(g.buttons || []).length})</b></p>
+    ${renderButtonsList(g.buttons)}
+
+    <h4>All stored settings (raw)</h4>
+    <pre class="settings-pre">${esc(JSON.stringify(data.settings_raw, null, 2))}</pre>
+  `;
+  $('#chat-detail-close')?.addEventListener('click', () => panel.classList.add('hidden'));
+}
+
+async function showChatDetail(chatId) {
+  const data = await api(`/api/admin/chats/${chatId}`);
+  renderChatDetail(data);
+  switchTab('chats');
 }
 
 function buildQuery(table) {
@@ -156,16 +283,32 @@ async function loadUsers() {
 
 async function loadChats() {
   const data = await api(`/api/admin/chats?${buildQuery('chats')}`);
-  const rows = data.items.map(c => `<tr>
-    <td>${c.chat_id}</td>
+  const rows = data.items.map(c => {
+    const s = c.settings_summary || {};
+    return `<tr class="clickable-row" data-chat-id="${c.chat_id}">
+    <td><code>${c.chat_id}</code></td>
     <td>${esc(c.title || '—')}</td>
     <td>${c.type || '—'}</td>
     <td>${statusPill(c.status || 'unknown')}</td>
+    <td>${s.auto_approval ? '✅' : '❌'} ${s.approval_delay_seconds ? `(${s.approval_delay_seconds}s)` : ''}</td>
+    <td>${s.welcome_enabled ? '✅' : '❌'} · ${s.welcome_buttons_count || 0} btn</td>
+    <td>${s.goodbye_enabled ? '✅' : '❌'}</td>
     <td>${c.total_approved || 0}</td>
-    <td>${c.total_welcome_sent || 0}</td>
-    <td>${fmtDate(c.created_at)}</td>
-  </tr>`);
-  renderTable('chats-table', ['Chat ID', 'Title', 'Type', 'Status', 'Approved', 'Welcome', 'Created'], rows);
+    <td><button type="button" class="btn sm" data-chat-view="${c.chat_id}">View</button></td>
+  </tr>`;
+  });
+  renderTable('chats-table',
+    ['Chat ID', 'Title', 'Type', 'Status', 'Auto-approve', 'Welcome', 'Goodbye', 'Approved', ''],
+    rows);
+  $all('[data-chat-view]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showChatDetail(btn.dataset.chatView);
+    });
+  });
+  $all('tr[data-chat-id]').forEach(tr => {
+    tr.addEventListener('click', () => showChatDetail(tr.dataset.chatId));
+  });
   renderPager('chats', data);
 }
 

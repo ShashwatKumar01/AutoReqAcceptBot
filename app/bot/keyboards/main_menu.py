@@ -11,14 +11,14 @@ def main_menu_keyboard(is_super_admin: bool = False) -> InlineKeyboardMarkup:
     # Row 2
     builder.button(text="🚪 Goodbye", callback_data="menu:goodbye")
     builder.button(text="📢 Broadcast", callback_data="menu:broadcast")
-    # Row 3
-    builder.button(text="📊 Statistics", callback_data="menu:stats")
+    # Row 3 — tutorial before help
     builder.button(text="📖 Tutorial", callback_data="menu:tutorial")
-    # Row 4
-    builder.button(text="⚡ Approval", callback_data="menu:approval")
-    builder.button(text="💳 Plan", callback_data="menu:plan")
-    # Row 5
     builder.button(text="❓ Help", callback_data="menu:help")
+    # Row 4
+    builder.button(text="📊 Statistics", callback_data="menu:stats")
+    builder.button(text="⚡ Approval", callback_data="menu:approval")
+    # Row 5
+    builder.button(text="💳 Plan", callback_data="menu:plan")
     builder.button(text="🔄 Refresh", callback_data="menu:refresh")
 
     builder.adjust(2, 2, 2, 2, 2)

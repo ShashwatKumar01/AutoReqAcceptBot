@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     bot_token: str = Field(alias='BOT_TOKEN')
 
     mongodb_uri: str = Field(alias='MONGODB_URI')
-    mongodb_database: str = Field(alias='MONGODB_DATABASE')
+    mongodb_database: str = Field(default='RequestAcceptBot', alias='MONGODB_DATABASE')
 
     redis_url: str = Field(alias='REDIS_URL')
 

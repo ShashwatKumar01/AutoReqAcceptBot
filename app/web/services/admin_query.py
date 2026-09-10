@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 import uuid
 
-from app.web.utils import serialize_doc, broadcast_progress
+from app.web.utils import serialize_doc, broadcast_progress, mask_bot_token
 
 
 class AdminQueryService:
@@ -126,7 +126,98 @@ class AdminQueryService:
             .limit(params['limit'])
         )
         items = [serialize_doc(d) async for d in cursor]
+        await self._attach_settings_summary(items)
         return self._page(items, total, params)
+
+    async def get_chat(self, chat_id: int) -> dict | None:
+        chat = await self.chat_repo.get_by_chat_id(chat_id)
+        if not chat:
+            return None
+        settings = await self.chat_repo.get_settings_with_defaults(chat_id)
+        approval = self.chat_repo.parse_approval_settings(settings)
+        admin_rows = await self.chat_repo.get_admins(chat_id)
+        admin_ids = sorted({int(r["user_id"]) for r in admin_rows if r.get("user_id") is not None})
+
+        settings_out = serialize_doc(settings) or {}
+        settings_out.pop("id", None)
+
+        return {
+            "chat": serialize_doc(chat),
+            "admin_user_ids": admin_ids,
+            "approval": approval,
+            "welcome": {
+                "enabled": settings.get("welcome_enabled", True),
+                "trigger": settings.get("welcome_trigger", "on_approval"),
+                "delay_seconds": settings.get("welcome_delay_seconds", 0),
+                "frequency": settings.get("welcome_frequency", "every_join"),
+                "parse_mode": settings.get("welcome_parse_mode", "HTML"),
+                "text": settings.get("welcome_text", ""),
+                "media_type": settings.get("welcome_media_type", ""),
+                "media_file_id": settings.get("welcome_media_file_id", ""),
+                "buttons": settings.get("welcome_buttons", []),
+            },
+            "goodbye": {
+                "enabled": settings.get("goodbye_enabled", False),
+                "frequency": settings.get("goodbye_frequency", "every_leave"),
+                "text": settings.get("goodbye_text", ""),
+                "media_type": settings.get("goodbye_media_type", ""),
+                "media_file_id": settings.get("goodbye_media_file_id", ""),
+                "buttons": settings.get("goodbye_buttons", []),
+            },
+            "settings_raw": settings_out,
+        }
+
+    async def bot_info(self, settings, bot_info: dict | None, include_token: bool = True) -> dict:
+        info = bot_info or {}
+        token = settings.bot_token or ""
+        out = {
+            "telegram": {
+                "id": info.get("id"),
+                "username": info.get("username"),
+                "first_name": info.get("first_name"),
+                "can_join_groups": info.get("can_join_groups"),
+                "can_read_all_group_messages": info.get("can_read_all_group_messages"),
+                "supports_inline_queries": info.get("supports_inline_queries"),
+            },
+            "deployment": {
+                "environment": getattr(settings, "environment", None),
+                "webhook_url": getattr(settings, "webhook_url", None),
+                "webhook_path": getattr(settings, "webhook_path", None),
+                "admin_web_url": getattr(settings, "admin_web_url", None),
+            },
+            "super_admin_ids": list(getattr(settings, "super_admin_id_list", []) or []),
+            "token_configured": bool(token),
+            "token_masked": mask_bot_token(token),
+        }
+        if include_token and token:
+            out["bot_token"] = token
+        return out
+
+    async def _attach_settings_summary(self, items: list[dict]) -> None:
+        if not items:
+            return
+        chat_ids = [i["chat_id"] for i in items if i.get("chat_id") is not None]
+        if not chat_ids:
+            return
+        by_id: dict[int, dict] = {}
+        cursor = self.chat_repo.settings_collection.find({"chat_id": {"$in": chat_ids}})
+        async for doc in cursor:
+            by_id[doc["chat_id"]] = doc
+        for item in items:
+            cid = item.get("chat_id")
+            if cid is None:
+                continue
+            s = by_id.get(cid) or {}
+            approval = self.chat_repo.parse_approval_settings(s)
+            item["settings_summary"] = {
+                "auto_approval": approval["enabled"],
+                "approval_delay_seconds": approval["delay"],
+                "captcha_enabled": approval["captcha_enabled"],
+                "welcome_enabled": s.get("welcome_enabled", True),
+                "welcome_buttons_count": len(s.get("welcome_buttons") or []),
+                "goodbye_enabled": s.get("goodbye_enabled", False),
+                "goodbye_buttons_count": len(s.get("goodbye_buttons") or []),
+            }
 
     async def list_join_requests(self, params: dict) -> dict:
         query: dict[str, Any] = {}

@@ -23,7 +23,8 @@
       <nav>
         <button class="nav-btn active" data-tab="dashboard">📊 Dashboard</button>
         <button class="nav-btn" data-tab="users">👥 Users</button>
-        <button class="nav-btn" data-tab="chats">💬 Chats</button>
+        <button class="nav-btn" data-tab="bot">🤖 Bot</button>
+        <button class="nav-btn" data-tab="chats">💬 Chats &amp; settings</button>
         <button class="nav-btn" data-tab="requests">📨 Join Requests</button>
         <button class="nav-btn" data-tab="broadcasts">📢 Broadcasts</button>
         <button class="nav-btn" data-tab="create-broadcast">➕ New Broadcast</button>
@@ -39,7 +40,13 @@
 
       <!-- Dashboard -->
       <section id="tab-dashboard" class="tab active">
+        <div id="dashboard-bot-strip" class="bot-strip"></div>
         <div id="stats-cards" class="cards"></div>
+      </section>
+
+      <!-- Bot -->
+      <section id="tab-bot" class="tab">
+        <div id="bot-detail" class="detail-panel"></div>
       </section>
 
       <!-- Users -->
@@ -85,6 +92,7 @@
         </div>
         <div class="table-wrap"><table id="chats-table"><thead></thead><tbody></tbody></table></div>
         <div class="pager" data-table="chats"></div>
+        <div id="chat-detail" class="detail-panel hidden"></div>
       </section>
 
       <!-- Join Requests -->
