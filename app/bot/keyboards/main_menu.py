@@ -1,7 +1,7 @@
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from app.bot.keyboards.styled import STYLE_LINK, STYLE_PRIMARY
+from app.bot.keyboards.styled import STYLE_PRIMARY
 
 def main_menu_keyboard(is_super_admin: bool = False) -> InlineKeyboardMarkup:
     """Main menu shown after /start."""
@@ -57,12 +57,10 @@ def welcome_start_keyboard(bot_username: str = "") -> InlineKeyboardMarkup:
         builder.button(
             text="➕ Add to Group",
             url=f"https://t.me/{bot_username}?startgroup=true",
-            style=STYLE_LINK,
         )
         builder.button(
             text="➕ Add to Channel",
             url=f"https://t.me/{bot_username}?startchannel=true",
-            style=STYLE_LINK,
         )
 
     # Row 2: secondary actions

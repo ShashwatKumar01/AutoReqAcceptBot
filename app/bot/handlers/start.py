@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..keyboards.main_menu import main_menu_keyboard, welcome_start_keyboard
 from ..keyboards.help_menu import help_keyboard
-from ..keyboards.styled import STYLE_LINK, STYLE_PRIMARY
+from ..keyboards.styled import STYLE_PRIMARY
 from ..texts.help_content import build_help_text
 
 router = Router()
@@ -29,12 +29,10 @@ def _start_keyboard(has_chats: bool, bot_username: str, is_super_admin: bool):
         builder.button(
             text="➕ Add to Group",
             url=f"https://t.me/{bot_username}?startgroup=true",
-            style=STYLE_LINK,
         )
         builder.button(
             text="➕ Add to Channel",
             url=f"https://t.me/{bot_username}?startchannel=true",
-            style=STYLE_LINK,
         )
     if has_chats:
         builder.button(
