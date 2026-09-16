@@ -1,7 +1,13 @@
 # Periodic MongoDB backup for AutoReqAcceptBot.
-# Setup: GitHub repo → Settings → Secrets → Actions
-#   MONGODB_URI — must be reachable from GitHub (Railway public Mongo URL or Atlas).
-#   MONGODB_DATABASE — optional, default request_accept_bot
+#
+# Why runs often fail:
+#   1. MONGODB_URI not set under Settings → Secrets → Actions
+#   2. Atlas Network Access blocks GitHub IPs — add 0.0.0.0/0 (or disable this job and use Railway cron)
+#   3. MONGODB_DATABASE wrong — must match Railway (usually RequestAcceptBot)
+#
+# Optional Telegram delivery (DM backup file to owner):
+#   BOT_TOKEN — same as production bot
+#   BACKUP_TELEGRAM_CHAT_ID — your numeric user ID (must have /start the bot in DM)
 #
 # Manual run: Actions → Mongo backup → Run workflow
 
@@ -24,8 +30,18 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Validate secrets
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          if [ -z "$MONGODB_URI" ]; then
+            echo "::error::GitHub secret MONGODB_URI is missing. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          echo "MONGODB_URI is set (length ${#MONGODB_URI})"
+
       - name: Install deps
-        run: pip install pymongo python-dotenv
+        run: pip install pymongo python-dotenv requests
 
       - name: Export database
         env:
@@ -41,3 +57,11 @@ jobs:
           path: backup_out/*.tar.gz
           retention-days: 90
           if-no-files-found: error
+
+      - name: Send backup to owner on Telegram
+        continue-on-error: true
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          BACKUP_TELEGRAM_CHAT_ID: ${{ secrets.BACKUP_TELEGRAM_CHAT_ID }}
+          BACKUP_DIR: backup_out
+        run: python scripts/mongo_backup_telegram_send.py

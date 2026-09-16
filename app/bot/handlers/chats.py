@@ -46,22 +46,17 @@ async def chats_menu_callback(callback: CallbackQuery, chat_repo):
 
 @router.callback_query(F.data.startswith('chat:select:'))
 async def select_chat_callback(callback: CallbackQuery, chat_repo, is_super_admin: bool):
-    """
-    Legacy per-chat action panel. Removed from the main flow — any
-    leftover reference (e.g. an old inline button) now bounces back to
-    the master menu instead of opening the deprecated panel.
-    """
-    user_id = callback.from_user.id
-    chats = await chat_repo.get_by_admin(user_id)
-    from ..keyboards.main_menu import main_menu_keyboard
-    text = (
-        "📋 <b>Main Menu</b>\n\n"
-        f"Connected chats: <b>{len(chats)}</b>"
+    chat_id = int(callback.data.split(':')[2])
+    chat = await chat_repo.get(chat_id)
+    if not chat:
+        return await callback.answer("Chat not found.", show_alert=True)
+    title = chat.get("title", chat_id)
+    from ..keyboards.chat_menu import chat_action_keyboard
+    await callback.message.edit_text(
+        f"⚙️ <b>Settings</b> — <b>{title}</b>\n\n"
+        "Choose what to configure for this chat:",
+        reply_markup=chat_action_keyboard(chat_id),
     )
-    try:
-        await callback.message.edit_text(text, reply_markup=main_menu_keyboard(is_super_admin=is_super_admin))
-    except Exception:
-        pass
     await callback.answer()
 
 @router.callback_query(F.data.startswith('chat:refresh:'))
@@ -87,16 +82,22 @@ async def disconnect_chat(callback: CallbackQuery, chat_repo, is_super_admin: bo
     parts = callback.data.split(':')
     if len(parts) > 3 and parts[2] == 'confirm':
         chat_id = int(parts[3])
-        await chat_repo.update_status(chat_id, "disconnected")
-        await callback.answer("Chat disconnected!")
+        await chat_repo.record_disconnect_request(chat_id, callback.from_user.id)
+        await callback.answer("Disconnected from panel (bot stays in chat).")
     else:
         chat_id = int(parts[2])
         from aiogram.utils.keyboard import InlineKeyboardBuilder
         b = InlineKeyboardBuilder()
-        b.button(text="⚠️ Confirm Disconnect", callback_data=f"chat:disconnect:confirm:{chat_id}")
-        b.button(text="← Cancel", callback_data="menu:main")
+        b.button(text="⚠️ Confirm", callback_data=f"chat:disconnect:confirm:{chat_id}")
+        b.button(text="← Cancel", callback_data=f"settings:hub:{chat_id}")
         b.adjust(1)
-        await callback.message.edit_text("Are you sure you want to disconnect this chat?", reply_markup=b.as_markup())
+        await callback.message.edit_text(
+            "Disconnect this chat from <b>your admin panel</b>?\n\n"
+            "• The bot <b>stays</b> in the group/channel until the owner removes it.\n"
+            "• Join-request handling stops for this chat until you reconnect.\n"
+            "• Your request will be saved in the database.",
+            reply_markup=b.as_markup(),
+        )
         return
 
     user_id = callback.from_user.id

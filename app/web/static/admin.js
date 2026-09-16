@@ -482,7 +482,7 @@ async function init() {
     const target = $('#broadcast-target')?.value;
     const wrap = $('#broadcast-chat-id-wrap');
     const input = $('#broadcast-target-id');
-    const needsChat = target === 'chat_members';
+    const needsChat = ['chat_members', 'chat_members_no_admins', 'specific_id'].includes(target);
     if (wrap) wrap.style.display = needsChat ? '' : 'none';
     if (input) input.required = needsChat;
   }

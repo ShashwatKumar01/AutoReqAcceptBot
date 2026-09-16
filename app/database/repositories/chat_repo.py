@@ -56,15 +56,36 @@ class ChatRepository:
         chat_ids = [record['chat_id'] for record in admin_records]
         if not chat_ids:
             return []
-        return await self.collection.find({"chat_id": {"$in": chat_ids}}).to_list(length=None)
+        return await self.collection.find({
+            "chat_id": {"$in": chat_ids},
+            "status": {"$ne": "disconnected"},
+        }).to_list(length=None)
+
+    async def record_disconnect_request(self, chat_id: int, user_id: int) -> None:
+        """Admin asked to disconnect in bot UI; bot stays in the chat until removed manually."""
+        now = datetime.now(timezone.utc)
+        await self.collection.update_one(
+            {"chat_id": chat_id},
+            {
+                "$set": {
+                    "status": "disconnected",
+                    "disconnect_requested_by": user_id,
+                    "disconnect_requested_at": now,
+                    "updated_at": now,
+                }
+            },
+        )
 
     async def get_all_active(self) -> List[Dict[str, Any]]:
         return await self.collection.find({"status": "active"}).to_list(length=None)
 
-    async def update_status(self, chat_id: int, status: str) -> bool:
+    async def update_status(self, chat_id: int, status: str, extra: Optional[Dict[str, Any]] = None) -> bool:
+        payload = {"status": status, "updated_at": datetime.now(timezone.utc)}
+        if extra:
+            payload.update(extra)
         result = await self.collection.update_one(
             {"chat_id": chat_id},
-            {"$set": {"status": status, "updated_at": datetime.now(timezone.utc)}}
+            {"$set": payload},
         )
         return result.modified_count > 0
 

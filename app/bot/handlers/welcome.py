@@ -409,6 +409,14 @@ async def remove_media(callback: CallbackQuery, chat_repo):
     await callback.answer("Media removed.")
 
 
+@router.callback_query(F.data.startswith("welcome:clear_text:"))
+async def clear_welcome_text(callback: CallbackQuery, chat_repo):
+    chat_id = int(callback.data.split(":")[2])
+    await chat_repo.upsert_settings(chat_id, {"welcome_text": ""})
+    await _render_editor(callback.message, chat_repo, chat_id, edit=True)
+    await callback.answer("Welcome text removed.")
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Timing / Trigger
 # ──────────────────────────────────────────────────────────────────────────────

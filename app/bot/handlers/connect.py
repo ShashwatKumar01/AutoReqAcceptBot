@@ -171,8 +171,12 @@ async def disconnect_command(message: Message, chat_repo):
                 "can disconnect it."
             )
 
-    await chat_repo.update_status(target_id, "disconnected")
-    await message.answer(f"✅ Disconnected <b>{chat.get('title', target_id)}</b>.")
+    await chat_repo.record_disconnect_request(target_id, user_id)
+    await message.answer(
+        f"✅ <b>{chat.get('title', target_id)}</b> disconnected from your panel.\n\n"
+        "<i>The bot remains in the chat until the owner removes it. "
+        "Use /connect to link again.</i>"
+    )
     logger.info("manual disconnect", chat_id=target_id, user_id=user_id)
 
 

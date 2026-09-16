@@ -49,12 +49,15 @@ async def _start_broadcast_picker(message_or_callback, state: FSMContext, chat_r
 
     await state.set_state(BroadcastStates.picking_target)
     await state.update_data(is_super_admin_broadcast=is_super_admin)
-    text = "Select who should receive this broadcast:"
+    text = (
+        "Select who should receive this broadcast.\n"
+        "<i>Messages are sent in private DM only — never posted in groups.</i>"
+    )
     kb = broadcast_picker_keyboard(chats, is_super_admin=is_super_admin)
     if isinstance(message_or_callback, Message):
-        await message_or_callback.answer(text, reply_markup=kb)
+        await message_or_callback.answer(text, reply_markup=kb, parse_mode="HTML")
     else:
-        await message_or_callback.message.edit_text(text, reply_markup=kb)
+        await message_or_callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.message(Command('broadcast'))
@@ -70,6 +73,24 @@ async def broadcast_menu(callback: CallbackQuery, state: FSMContext, chat_repo, 
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith('broadcast:chat:'))
+async def broadcast_from_chat_hub(callback: CallbackQuery, state: FSMContext, is_super_admin: bool = False):
+    chat_id = int(callback.data.split(':')[2])
+    await state.set_state(BroadcastStates.composing_message)
+    await state.update_data(
+        is_super_admin_broadcast=is_super_admin,
+        target='chat_members_no_admins' if is_super_admin else 'chat_members',
+        target_id=chat_id,
+        chat_scope_owner_id=None if is_super_admin else callback.from_user.id,
+    )
+    await callback.message.edit_text(
+        "Send the broadcast message (text, photo, video, document, or GIF).\n"
+        "<i>Delivered in private DM only.</i>",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
 @router.callback_query(BroadcastStates.picking_target, F.data.startswith('broadcast:pick:'))
 async def process_broadcast_pick(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -78,21 +99,32 @@ async def process_broadcast_pick(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split(':')
     action = parts[2]
 
-    if action == 'manual':
+    if action in ('manual', 'manual_noadmins', 'specific_id'):
         await state.set_state(BroadcastStates.enter_chat_id)
-        await callback.message.edit_text(
-            "Send the <b>chat ID</b> (e.g. <code>-1001234567890</code>):",
-            parse_mode="HTML",
-        )
+        await state.update_data(manual_pick=action)
+        if action == 'specific_id':
+            hint = "Send a <b>user ID</b> (DM one person) or <b>chat ID</b> (DM members, no admins for groups/channels):"
+        elif action == 'manual_noadmins':
+            hint = "Send the <b>group/channel chat ID</b> (members get a DM, admins excluded):"
+        else:
+            hint = "Send the <b>chat ID</b> (e.g. <code>-1001234567890</code>):"
+        await callback.message.edit_text(hint, parse_mode="HTML")
         return await callback.answer()
 
     target_id = None
     scope = user_id
 
-    if action == 'chat' and len(parts) >= 4:
+    if action == 'noadmins' and len(parts) >= 4:
+        target = 'chat_members_no_admins'
+        target_id = int(parts[3])
+        scope = None
+    elif action == 'chat' and len(parts) >= 4:
         target = 'chat_members'
         target_id = int(parts[3])
         scope = None if is_sa else user_id
+    elif action == 'all_users_and_admins':
+        target = 'all_users_and_admins'
+        scope = None
     elif action == 'all_users':
         target = 'all_users'
         scope = None
@@ -125,10 +157,20 @@ async def receive_chat_id(message: Message, state: FSMContext):
 
     data = await state.get_data()
     is_sa = data.get('is_super_admin_broadcast', False)
+    manual = data.get('manual_pick', 'manual')
+    if manual == 'specific_id':
+        target = 'specific_id'
+        scope = None
+    elif manual == 'manual_noadmins':
+        target = 'chat_members_no_admins'
+        scope = None
+    else:
+        target = 'chat_members'
+        scope = None if is_sa else message.from_user.id
     await state.update_data(
-        target='chat_members',
+        target=target,
         target_id=cid,
-        chat_scope_owner_id=None if is_sa else message.from_user.id,
+        chat_scope_owner_id=scope,
     )
     await state.set_state(BroadcastStates.composing_message)
     await message.answer("Now send the broadcast message (text, photo, video, document, or GIF):")

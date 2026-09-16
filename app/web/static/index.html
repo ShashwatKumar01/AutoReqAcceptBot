@@ -145,10 +145,10 @@
           <p class="form-hint">Runs as super admin automatically — no owner ID needed.</p>
           <label>Audience
             <select name="target" id="broadcast-target" required>
-              <option value="all_users">All users who /start the bot</option>
-              <option value="all_chat_members">All members (every connected chat)</option>
-              <option value="chat_admins">All chat admins who added the bot</option>
-              <option value="chat_members">Members of one chat (enter chat ID below)</option>
+              <option value="all_users_and_admins">All bot users + admins (DM only)</option>
+              <option value="chat_admins">All chat admins only (DM)</option>
+              <option value="chat_members_no_admins">Members of one chat — no admins (DM)</option>
+              <option value="specific_id">Specific user or chat ID (DM)</option>
             </select>
           </label>
           <label id="broadcast-chat-id-wrap">Chat ID

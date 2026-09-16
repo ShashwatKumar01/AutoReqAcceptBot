@@ -7,8 +7,8 @@ def main_menu_keyboard(is_super_admin: bool = False) -> InlineKeyboardMarkup:
     """Main menu shown after /start."""
     builder = InlineKeyboardBuilder()
 
-    # Row 1
-    builder.button(text="⚙️ Settings", callback_data="menu:settings")
+    # Row 1 — pick a chat first for settings; feature shortcuts still ask for chat when needed
+    builder.button(text="💬 Manage a chat", callback_data="menu:settings")
     builder.button(text="👋 Welcome", callback_data="menu:welcome")
     # Row 2
     builder.button(text="🚪 Goodbye", callback_data="menu:goodbye")

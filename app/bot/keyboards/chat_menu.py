@@ -55,14 +55,13 @@ def chat_action_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     builder.button(text="⚡ Approval", callback_data=f"settings:approval:{chat_id}")
     builder.button(text="👋 Welcome", callback_data=f"settings:welcome:{chat_id}")
     # Row 2
+    builder.button(text="🚪 Goodbye", callback_data=f"goodbye:edit:{chat_id}")
     builder.button(text="🔘 Buttons", callback_data=f"settings:buttons:{chat_id}")
-    builder.button(text="📢 Broadcast", callback_data=f"broadcast:chat:{chat_id}")
     # Row 3
+    builder.button(text="📢 Broadcast", callback_data=f"broadcast:chat:{chat_id}")
     builder.button(text="📊 Statistics", callback_data=f"stats:chat:{chat_id}")
-    builder.button(text="🔄 Refresh", callback_data=f"chat:refresh:{chat_id}")
-    # Row 4
-    builder.button(text="❌ Disconnect", callback_data=f"chat:disconnect:{chat_id}")
-    builder.button(text="← Back to Menu", callback_data="menu:main")
+    builder.button(text="❌ Disconnect from panel", callback_data=f"chat:disconnect:{chat_id}")
+    builder.button(text="← Back", callback_data=f"settings:hub:{chat_id}")
 
     builder.adjust(2, 2, 2, 2)
     return builder.as_markup()

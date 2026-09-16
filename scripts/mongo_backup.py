@@ -84,8 +84,8 @@ def main() -> int:
     parser.add_argument("--no-archive", action="store_true", help="Skip .tar.gz creation")
     args = parser.parse_args()
 
-    uri = os.environ.get("MONGODB_URI", "").strip()
-    db_name = os.environ.get("MONGODB_DATABASE", "RequestAcceptBot").strip()
+    uri = (os.environ.get("MONGODB_URI") or "").strip()
+    db_name = (os.environ.get("MONGODB_DATABASE") or "RequestAcceptBot").strip()
     if not uri:
         print("MONGODB_URI is required", file=sys.stderr)
         return 1

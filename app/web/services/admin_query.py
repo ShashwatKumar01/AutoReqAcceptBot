@@ -325,12 +325,19 @@ class AdminQueryService:
 
         target = data.get('target', 'all_users')
         target_id = data.get('target_id')
-        needs_chat = target in ('chat', 'chat_members')
-        if needs_chat and not target_id:
-            raise ValueError('Chat ID is required for this target')
+        needs_chat = target in (
+            'chat', 'chat_members', 'chat_members_no_admins', 'specific_id',
+        )
+        if needs_chat and target_id is None:
+            raise ValueError('Chat or user ID is required for this target')
+        if target == 'specific_id' and target_id is None:
+            raise ValueError('Telegram ID is required')
 
         chat_scope_owner_id = data.get('chat_scope_owner_id')
-        if target in ('all', 'all_chat_members', 'chat_admins'):
+        if target in (
+            'all', 'all_chat_members', 'chat_admins',
+            'all_users_and_admins', 'chat_members_no_admins', 'specific_id',
+        ):
             chat_scope_owner_id = None
 
         job_id = str(uuid.uuid4())

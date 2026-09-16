@@ -41,6 +41,8 @@ def welcome_editor_keyboard(
 
     if has_media:
         b.button(text="🗑 Clear media", callback_data=f"welcome:remove_media:{chat_id}")
+    if has_text:
+        b.button(text="🗑 Clear text", callback_data=f"welcome:clear_text:{chat_id}")
 
     b.button(text=f"🔘 Buttons · {btn_count}", callback_data=f"welcome:buttons:{chat_id}")
 
@@ -53,7 +55,10 @@ def welcome_editor_keyboard(
     b.button(text="👁 Preview", callback_data=f"welcome:preview:{chat_id}")
     b.button(text="← Menu", callback_data="menu:main")
 
-    if has_media:
+    extra = (1 if has_media else 0) + (1 if has_text else 0)
+    if extra >= 2:
+        b.adjust(2, 2, 2, 2, 1)
+    elif extra == 1:
         b.adjust(2, 2, 2, 2, 1)
     else:
         b.adjust(2, 2, 2, 1, 1)

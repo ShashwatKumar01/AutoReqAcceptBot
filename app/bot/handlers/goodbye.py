@@ -227,6 +227,8 @@ def _goodbye_editor_keyboard(
     b.button(text=f"🖼 {media_icon} Media", callback_data=f"goodbye:set_media:{chat_id}")
     if has_media:
         b.button(text="🗑 Clear media", callback_data=f"goodbye:remove_media:{chat_id}")
+    if has_text:
+        b.button(text="🗑 Clear text", callback_data=f"goodbye:clear_text:{chat_id}")
     b.button(text=f"🔘 Buttons · {btn_count}", callback_data=f"goodbye:buttons:{chat_id}")
     freq_short = "Once" if frequency == "once" else "Every leave"
     b.button(text=f"🔁 {freq_short}", callback_data=f"goodbye:freq_toggle:{chat_id}")
@@ -431,6 +433,14 @@ async def remove_media(callback: CallbackQuery, chat_repo):
     })
     await _render_editor(callback.message, chat_repo, chat_id, edit=True)
     await callback.answer("Media removed.")
+
+
+@router.callback_query(F.data.startswith("goodbye:clear_text:"))
+async def clear_goodbye_text(callback: CallbackQuery, chat_repo):
+    chat_id = int(callback.data.split(":")[2])
+    await chat_repo.upsert_settings(chat_id, {"goodbye_text": ""})
+    await _render_editor(callback.message, chat_repo, chat_id, edit=True)
+    await callback.answer("Goodbye text removed.")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
