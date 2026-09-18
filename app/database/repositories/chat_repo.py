@@ -3,6 +3,8 @@ from typing import Optional, List, Dict, Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
 
+from app.core.welcome_defaults import DEFAULT_WELCOME_TEXT
+
 class ChatRepository:
     def __init__(self, db: AsyncIOMotorDatabase):
         self.collection = db['chats']
@@ -164,7 +166,7 @@ class ChatRepository:
             "welcome_enabled": True,
             "welcome_trigger": "on_approval",
             "welcome_delay_seconds": 0,
-            "welcome_text": "",
+            "welcome_text": DEFAULT_WELCOME_TEXT,
             "welcome_media_file_id": "",
             "welcome_media_type": "",
             "welcome_buttons": [],

@@ -4,6 +4,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
+from app.core.welcome_defaults import DEFAULT_WELCOME_TEXT
 from ..keyboards.welcome_menu import (
     welcome_editor_keyboard,
     welcome_timing_keyboard,
@@ -29,11 +30,15 @@ class WelcomeStates(StatesGroup):
 async def _get_welcome_settings(chat_repo, chat_id: int) -> dict:
     """Load welcome settings from chat_settings collection with defaults."""
     settings = await chat_repo.get_chat_settings(chat_id) or {}
+    if "welcome_text" in settings:
+        welcome_text = settings.get("welcome_text") or ""
+    else:
+        welcome_text = DEFAULT_WELCOME_TEXT
     return {
         "welcome_enabled": settings.get("welcome_enabled", True),
         "welcome_trigger": settings.get("welcome_trigger", "on_approval"),
         "welcome_delay_seconds": settings.get("welcome_delay_seconds", 0),
-        "welcome_text": settings.get("welcome_text", ""),
+        "welcome_text": welcome_text,
         "welcome_media_file_id": settings.get("welcome_media_file_id", ""),
         "welcome_media_type": settings.get("welcome_media_type", ""),
         "welcome_buttons": settings.get("welcome_buttons", []),
@@ -304,7 +309,8 @@ async def start_edit_text(callback: CallbackQuery, state: FSMContext, chat_repo)
         "• <code>{last_name}</code> — last name\n"
         "• <code>{username}</code> — @username\n"
         "• <code>{chat_title}</code> / <code>{channel}</code> — group/channel name\n"
-        "• <code>{unlock_link}</code> — DM unlock link (Channel Help style)\n\n"
+        "• <code>{unlock_link}</code> — DM unlock link (Channel Help style)\n"
+        "• <b>Clear text</b> removes the message (members only see the unlock step)\n\n"
         "<b>Formatting:</b> HTML tags supported "
         "(<code>&lt;b&gt;</code>, <code>&lt;i&gt;</code>, <code>&lt;a href=…&gt;</code>, "
         "premium emoji <code>&lt;tg-emoji emoji-id=\"…\"&gt;⭐&lt;/tg-emoji&gt;</code>)\n\n"

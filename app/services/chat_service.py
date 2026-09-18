@@ -5,6 +5,8 @@ from app.database.repositories import ChatRepository, UserRepository
 from app.services.telegram_service import TelegramService
 from app.core.logging import get_logger
 from app.core.utils import utcnow
+from app.core.welcome_defaults import DEFAULT_WELCOME_TEXT
+from app.services.welcome_settings_seed import seed_welcome_settings_if_missing
 
 class ChatService:
     def __init__(
@@ -44,20 +46,7 @@ class ChatService:
             
         await self.chat_repo.upsert_chat(chat_data)
         
-        # Ensure settings exist
-        settings = await self.chat_repo.get_chat_settings(chat.id)
-        if not settings:
-            await self.chat_repo.settings_collection.insert_one({
-                "chat_id": chat.id,
-                "auto_approval_enabled": True,
-                "auto_approval_delay": 0,
-                "welcome_enabled": False,
-                "welcome_trigger": "on_approval",
-                "welcome_text": "Welcome to {chat_title}, {first_name}!",
-                "welcome_buttons": [],
-                "created_at": utcnow(),
-                "updated_at": utcnow()
-            })
+        await seed_welcome_settings_if_missing(self.chat_repo, chat.id)
             
         updated_chat = await self.chat_repo.get_by_chat_id(chat.id)
         return updated_chat

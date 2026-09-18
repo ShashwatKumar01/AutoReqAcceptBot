@@ -8,6 +8,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from app.database.repositories import JoinRequestRepository, ChatRepository, UserRepository
 from app.services.telegram_service import TelegramService
 from app.core.deep_links import welcome_deeplink
+from app.core.welcome_defaults import DEFAULT_WELCOME_TEXT
 from app.core.logging import get_logger
 from app.core.utils import utcnow
 
@@ -123,12 +124,20 @@ class WelcomeService:
         from_user,
         *,
         request_doc: Optional[Dict[str, Any]] = None,
+        replace_message_id: Optional[int] = None,
     ) -> bool:
         """Send configured welcome DM (used after unlock deep-link)."""
         ws = await self._load_settings(chat_id)
         if not ws.get("welcome_enabled", True):
             return False
-        return await self._send(user_id, chat_id, from_user, ws, request_doc)
+        return await self._send(
+            user_id,
+            chat_id,
+            from_user,
+            ws,
+            request_doc,
+            replace_message_id=replace_message_id,
+        )
 
     async def process_due_welcome_messages(self, now: datetime) -> int:
         """
@@ -217,14 +226,16 @@ class WelcomeService:
         )
         bot: Bot | None = getattr(self.telegram_service, "bot", None)
         ok = False
+        invite_msg_id = None
         try:
             if bot:
-                await bot.send_message(
+                msg = await bot.send_message(
                     chat_id=user_id,
                     text=text,
                     parse_mode="HTML",
                     reply_markup=markup,
                 )
+                invite_msg_id = msg.message_id
                 ok = True
             else:
                 ok = await self.telegram_service.send_message(
@@ -248,6 +259,11 @@ class WelcomeService:
                     {
                         "welcome_status": "invite_sent" if ok else "invite_failed",
                         **({"welcome_invite_at": utcnow()} if ok else {}),
+                        **(
+                            {"welcome_invite_message_id": invite_msg_id}
+                            if ok and invite_msg_id
+                            else {}
+                        ),
                     },
                 )
             except Exception:
@@ -263,17 +279,34 @@ class WelcomeService:
     async def _load_settings(self, chat_id: int) -> Dict[str, Any]:
         """Load welcome settings from chat_settings collection with defaults."""
         raw = await self.chat_repo.get_chat_settings(chat_id) or {}
+        if "welcome_text" in raw:
+            welcome_text = raw.get("welcome_text") or ""
+        else:
+            welcome_text = DEFAULT_WELCOME_TEXT
         return {
             "welcome_enabled": raw.get("welcome_enabled", True),
             "welcome_trigger": raw.get("welcome_trigger", "on_approval"),
             "welcome_delay_seconds": raw.get("welcome_delay_seconds", 0),
-            "welcome_text": raw.get("welcome_text", ""),
+            "welcome_text": welcome_text,
             "welcome_media_file_id": raw.get("welcome_media_file_id", ""),
             "welcome_media_type": raw.get("welcome_media_type", "photo"),
             "welcome_buttons": raw.get("welcome_buttons", []),
             "welcome_parse_mode": raw.get("welcome_parse_mode", "HTML"),
             "welcome_frequency": raw.get("welcome_frequency", "every_join"),
         }
+
+    async def _delete_invite_message(
+        self,
+        bot: Bot | None,
+        user_id: int,
+        message_id: int | None,
+    ) -> None:
+        if not bot or not message_id:
+            return
+        try:
+            await bot.delete_message(chat_id=user_id, message_id=int(message_id))
+        except Exception:
+            pass
 
     async def _send(
         self,
@@ -282,6 +315,8 @@ class WelcomeService:
         from_user,
         ws: Dict[str, Any],
         request_doc: Optional[Dict[str, Any]],
+        *,
+        replace_message_id: Optional[int] = None,
     ) -> bool:
         """Build and send the welcome message. Returns True on success."""
         chat_doc = await self.chat_repo.get(chat_id) or {}
@@ -310,55 +345,74 @@ class WelcomeService:
 
         bot: Bot | None = getattr(self.telegram_service, "bot", None)
         ok = False
+        invite_id = replace_message_id
+        if invite_id is None and request_doc:
+            invite_id = request_doc.get("welcome_invite_message_id")
 
-        try:
-            if bot and media_id:
-                if media_type == "photo":
-                    msg = await bot.send_photo(
-                        chat_id=user_id, photo=media_id,
-                        caption=text[:1024] or None, parse_mode=parse_mode,
-                        reply_markup=keyboard,
-                    )
-                elif media_type == "video":
-                    msg = await bot.send_video(
-                        chat_id=user_id, video=media_id,
-                        caption=text[:1024] or None, parse_mode=parse_mode,
-                        reply_markup=keyboard,
-                    )
-                elif media_type == "animation":
-                    msg = await bot.send_animation(
-                        chat_id=user_id, animation=media_id,
-                        caption=text[:1024] or None, parse_mode=parse_mode,
-                        reply_markup=keyboard,
-                    )
-                elif media_type == "document":
-                    msg = await bot.send_document(
-                        chat_id=user_id, document=media_id,
-                        caption=text[:1024] or None, parse_mode=parse_mode,
-                        reply_markup=keyboard,
-                    )
-                else:
+        if bot and invite_id and text and not media_id:
+            try:
+                await bot.edit_message_text(
+                    chat_id=user_id,
+                    message_id=int(invite_id),
+                    text=text[:4096],
+                    parse_mode=parse_mode,
+                    reply_markup=keyboard,
+                )
+                ok = True
+            except Exception:
+                await self._delete_invite_message(bot, user_id, invite_id)
+
+        if not ok:
+            if bot and media_id and invite_id:
+                await self._delete_invite_message(bot, user_id, invite_id)
+            try:
+                if bot and media_id:
+                    if media_type == "photo":
+                        msg = await bot.send_photo(
+                            chat_id=user_id, photo=media_id,
+                            caption=text[:1024] or None, parse_mode=parse_mode,
+                            reply_markup=keyboard,
+                        )
+                    elif media_type == "video":
+                        msg = await bot.send_video(
+                            chat_id=user_id, video=media_id,
+                            caption=text[:1024] or None, parse_mode=parse_mode,
+                            reply_markup=keyboard,
+                        )
+                    elif media_type == "animation":
+                        msg = await bot.send_animation(
+                            chat_id=user_id, animation=media_id,
+                            caption=text[:1024] or None, parse_mode=parse_mode,
+                            reply_markup=keyboard,
+                        )
+                    elif media_type == "document":
+                        msg = await bot.send_document(
+                            chat_id=user_id, document=media_id,
+                            caption=text[:1024] or None, parse_mode=parse_mode,
+                            reply_markup=keyboard,
+                        )
+                    else:
+                        msg = await bot.send_message(
+                            chat_id=user_id, text=text[:4096],
+                            parse_mode=parse_mode, reply_markup=keyboard,
+                        )
+                    ok = msg is not None
+                elif bot:
                     msg = await bot.send_message(
                         chat_id=user_id, text=text[:4096],
                         parse_mode=parse_mode, reply_markup=keyboard,
                     )
-                ok = msg is not None
-            elif bot:
-                msg = await bot.send_message(
-                    chat_id=user_id, text=text[:4096],
-                    parse_mode=parse_mode, reply_markup=keyboard,
+                    ok = msg is not None
+                else:
+                    ok = await self.telegram_service.send_message(
+                        chat_id=user_id, text=text[:4096], reply_markup=keyboard,
+                    )
+            except Exception as e:
+                self.logger.warning(
+                    "Welcome send failed",
+                    user_id=user_id, chat_id=chat_id, error=str(e),
                 )
-                ok = msg is not None
-            else:
-                ok = await self.telegram_service.send_message(
-                    chat_id=user_id, text=text[:4096], reply_markup=keyboard,
-                )
-        except Exception as e:
-            self.logger.warning(
-                "Welcome send failed",
-                user_id=user_id, chat_id=chat_id, error=str(e),
-            )
-            ok = False
+                ok = False
 
         # Update join_request status
         if self.join_request_repo and request_doc:

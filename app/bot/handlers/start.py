@@ -1,5 +1,3 @@
-import html
-
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
 from aiogram.filters.command import CommandObject
@@ -65,23 +63,25 @@ def _start_keyboard(has_chats: bool, bot_username: str, is_super_admin: bool):
     return builder.as_markup()
 
 
-async def _send_welcome_unlock_teaser(
+async def _deliver_welcome_from_deep_link(
     message: Message,
     chat_id: int,
     chat_repo,
     user_repo,
+    welcome_service,
+    join_request_repo,
     from_user,
 ) -> None:
+    """
+    User already tapped Unlock (invite URL → ?start=wel_…).
+    Deliver the real welcome once — do not show a second teaser.
+    """
     chat_doc = await chat_repo.get(chat_id)
     if not chat_doc or chat_doc.get("status") == "disconnected":
         await message.answer(
             "This link is no longer valid — the chat was removed from the bot.",
         )
         return
-
-    title = html.escape(chat_doc.get("title") or "Channel")
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🔒 Unlock it now", callback_data=f"wel:unlock:{chat_id}")
 
     await user_repo.upsert({
         "telegram_id": from_user.id,
@@ -95,10 +95,21 @@ async def _send_welcome_unlock_teaser(
         "private_chat_started": True,
     })
 
-    await message.answer(
-        f"<b>{title}</b> sent you a private message.\nClick below and see. 👇",
-        reply_markup=builder.as_markup(),
+    jr = await join_request_repo.collection.find_one(
+        {"user_id": from_user.id, "chat_id": chat_id},
     )
+    invite_mid = (jr or {}).get("welcome_invite_message_id")
+    ok = await welcome_service.deliver_welcome(
+        from_user.id,
+        chat_id,
+        from_user,
+        request_doc=jr,
+        replace_message_id=invite_mid,
+    )
+    if not ok:
+        await message.answer(
+            "No welcome message is set for this chat yet, or it could not be delivered.",
+        )
 
 
 @router.message(CommandStart())
@@ -108,6 +119,8 @@ async def start_handler(
     state: FSMContext,
     user_repo,
     chat_repo,
+    welcome_service,
+    join_request_repo,
     is_super_admin: bool,
     bot_username: str = "",
 ):
@@ -119,8 +132,14 @@ async def start_handler(
     """
     wel_chat_id = parse_welcome_start(command.args)
     if wel_chat_id is not None:
-        await _send_welcome_unlock_teaser(
-            message, wel_chat_id, chat_repo, user_repo, message.from_user,
+        await _deliver_welcome_from_deep_link(
+            message,
+            wel_chat_id,
+            chat_repo,
+            user_repo,
+            welcome_service,
+            join_request_repo,
+            message.from_user,
         )
         return
 
@@ -175,7 +194,11 @@ async def welcome_unlock_callback(
         return
 
     ok = await welcome_service.deliver_welcome(
-        user_id, chat_id, callback.from_user, request_doc=jr,
+        user_id,
+        chat_id,
+        callback.from_user,
+        request_doc=jr,
+        replace_message_id=callback.message.message_id,
     )
     if ok:
         await callback.answer("Unlocked ✅")

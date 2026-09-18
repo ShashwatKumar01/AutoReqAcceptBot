@@ -122,6 +122,8 @@ async def connect_command(message: Message, chat_repo, bot: Bot):
     }
     await chat_repo.upsert(chat_data)
     await chat_repo.upsert_admin(target_id, user_id)
+    from app.services.welcome_settings_seed import seed_welcome_settings_if_missing
+    await seed_welcome_settings_if_missing(chat_repo, target_id)
 
     warning = ""
     if not user_is_owner:

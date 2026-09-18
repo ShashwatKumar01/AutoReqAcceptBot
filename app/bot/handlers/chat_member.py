@@ -3,6 +3,7 @@ from aiogram.types import ChatMemberUpdated
 from aiogram.filters import ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER
 
 from app.core.logging import get_logger
+from app.services.welcome_settings_seed import seed_welcome_settings_if_missing
 
 router = Router()
 logger = get_logger('chat_member')
@@ -41,6 +42,7 @@ async def bot_chat_member_updated(
                 "status": "connected",
             }
             await chat_repo.upsert(chat_data)
+            await seed_welcome_settings_if_missing(chat_repo, chat.id)
             logger.info("my_chat_member: chat upserted",
                         chat_id=chat.id, title=chat.title)
             # Also record the adder in chat_admins so get_by_admin(user_id)
