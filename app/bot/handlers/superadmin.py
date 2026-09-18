@@ -55,7 +55,12 @@ async def admin_panel(message: Message):
 @router.message(Command('users'))
 async def users_stats(message: Message, user_repo):
     count = await user_repo.count()
-    await message.answer(f"👥 <b>Total Users:</b> {count}", reply_markup=superadmin_stats_keyboard())
+    eligible = await user_repo.count_broadcast_eligible()
+    await message.answer(
+        f"👥 <b>Total Users:</b> {count}\n"
+        f"📣 <b>Broadcast eligible:</b> {eligible}",
+        reply_markup=superadmin_stats_keyboard(),
+    )
 
 
 @router.message(Command('chats'))
@@ -95,8 +100,10 @@ async def admin_callbacks(callback: CallbackQuery, state: FSMContext, user_repo,
         )
     elif action == 'users':
         count = await user_repo.count()
+        eligible = await user_repo.count_broadcast_eligible()
         await callback.message.edit_text(
-            f"👥 <b>Total Users:</b> {count}\n\n"
+            f"👥 <b>Total Users:</b> {count}\n"
+            f"📣 <b>Broadcast eligible:</b> {eligible}\n\n"
             f"Full list: <code>{url}</code> → Users tab",
             reply_markup=superadmin_stats_keyboard(),
         )

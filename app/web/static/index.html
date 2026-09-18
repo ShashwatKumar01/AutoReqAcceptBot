@@ -25,6 +25,7 @@
         <button class="nav-btn" data-tab="users">👥 Users</button>
         <button class="nav-btn" data-tab="bot">🤖 Bot</button>
         <button class="nav-btn" data-tab="chats">💬 Chats &amp; settings</button>
+        <button class="nav-btn" data-tab="chat-admins">👤 Chat admins</button>
         <button class="nav-btn" data-tab="requests">📨 Join Requests</button>
         <button class="nav-btn" data-tab="broadcasts">📢 Broadcasts</button>
         <button class="nav-btn" data-tab="create-broadcast">➕ New Broadcast</button>
@@ -93,6 +94,19 @@
         <div class="table-wrap"><table id="chats-table"><thead></thead><tbody></tbody></table></div>
         <div class="pager" data-table="chats"></div>
         <div id="chat-detail" class="detail-panel hidden"></div>
+      </section>
+
+      <!-- Chat admins -->
+      <section id="tab-chat-admins" class="tab">
+        <div class="toolbar">
+          <input class="search" data-table="chatAdmins" placeholder="Search admin ID, username, or name…" />
+          <select class="sort" data-table="chatAdmins">
+            <option value="telegram_id">Telegram ID</option>
+          </select>
+        </div>
+        <div class="table-wrap"><table id="chat-admins-table"><thead></thead><tbody></tbody></table></div>
+        <div class="pager" data-table="chatAdmins"></div>
+        <div id="chat-admin-detail" class="detail-panel hidden"></div>
       </section>
 
       <!-- Join Requests -->

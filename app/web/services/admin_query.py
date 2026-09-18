@@ -1,4 +1,5 @@
 import asyncio
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 import uuid
@@ -31,6 +32,7 @@ class AdminQueryService:
         (
             users_total,
             users_active,
+            users_broadcast_eligible,
             users_new_week,
             users_new_day,
             chats_total,
@@ -49,6 +51,7 @@ class AdminQueryService:
         ) = await asyncio.gather(
             self.user_repo.count(),
             self.user_repo.count_by_status('active'),
+            self.user_repo.count_broadcast_eligible(),
             self.user_repo.count_new_since(week_ago),
             self.user_repo.count_new_since(day_ago),
             self.chat_repo.count(),
@@ -70,6 +73,7 @@ class AdminQueryService:
             "users": {
                 "total": users_total,
                 "active": users_active,
+                "broadcast_eligible": users_broadcast_eligible,
                 "new_week": users_new_week,
                 "new_today": users_new_day,
             },
@@ -152,7 +156,19 @@ class AdminQueryService:
         )
         items = [serialize_doc(d) async for d in cursor]
         await self._attach_settings_summary(items)
+        await self._attach_chat_broadcast_stats(items)
         return self._page(items, total, params)
+
+    async def _attach_chat_broadcast_stats(self, items: list[dict]) -> None:
+        for item in items:
+            cid = item.get("chat_id")
+            if cid is None:
+                continue
+            cid = int(cid)
+            item["broadcast_eligible"] = await self.user_repo.count_broadcast_eligible(
+                chat_ids=[cid],
+            )
+            item["tracked_members"] = await self.user_repo.count_tracked_in_chats([cid])
 
     async def get_chat(self, chat_id: int) -> dict | None:
         chat = await self.chat_repo.get_by_chat_id(chat_id)
@@ -166,9 +182,16 @@ class AdminQueryService:
         settings_out = serialize_doc(settings) or {}
         settings_out.pop("id", None)
 
+        broadcast_eligible = await self.user_repo.count_broadcast_eligible(chat_ids=[chat_id])
+        tracked_members = await self.user_repo.count_tracked_in_chats([chat_id])
+
         return {
             "chat": serialize_doc(chat),
             "admin_user_ids": admin_ids,
+            "audience": {
+                "broadcast_eligible": broadcast_eligible,
+                "tracked_members": tracked_members,
+            },
             "approval": approval,
             "welcome": {
                 "enabled": settings.get("welcome_enabled", True),
@@ -376,6 +399,93 @@ class AdminQueryService:
         if action not in allowed:
             raise ValueError(f'Unknown action: {action}')
         return await self.broadcast_repo.update_job_status(job_id, allowed[action])
+
+    async def _admin_chat_map(self) -> dict[int, set[int]]:
+        admin_to_chats: dict[int, set[int]] = defaultdict(set)
+        async for row in self.chat_repo.admins_collection.find({}):
+            uid = row.get("user_id")
+            cid = row.get("chat_id")
+            if uid is not None and cid is not None:
+                admin_to_chats[int(uid)].add(int(cid))
+        async for chat in self.chat_repo.collection.find({}, {"chat_id": 1, "admin_id": 1}):
+            aid = chat.get("admin_id")
+            cid = chat.get("chat_id")
+            if aid is not None and cid is not None:
+                admin_to_chats[int(aid)].add(int(cid))
+        return admin_to_chats
+
+    async def list_chat_admins(self, params: dict) -> dict:
+        admin_map = await self._admin_chat_map()
+        admin_ids = sorted(admin_map.keys())
+
+        q = (params.get("q") or "").strip()
+        if q:
+            if q.isdigit():
+                tid = int(q)
+                admin_ids = [tid] if tid in admin_map else []
+            else:
+                regex = {"$regex": q, "$options": "i"}
+                matched = await self.user_repo.collection.find(
+                    {"$or": [{"username": regex}, {"first_name": regex}, {"last_name": regex}]},
+                    {"telegram_id": 1},
+                ).to_list(length=500)
+                id_set = {int(d["telegram_id"]) for d in matched if d.get("telegram_id")}
+                admin_ids = [i for i in admin_ids if i in id_set]
+
+        total = len(admin_ids)
+        skip = params["skip"]
+        limit = params["limit"]
+        page_ids = admin_ids[skip : skip + limit]
+
+        items = []
+        for uid in page_ids:
+            items.append(await self._chat_admin_summary(uid, admin_map.get(uid, set())))
+
+        return self._page(items, total, params)
+
+    async def get_chat_admin(self, user_id: int) -> dict | None:
+        admin_map = await self._admin_chat_map()
+        chat_ids = admin_map.get(int(user_id))
+        if not chat_ids:
+            user = await self.user_repo.get_by_telegram_id(int(user_id))
+            if not user:
+                return None
+            return await self._chat_admin_summary(int(user_id), set())
+        return await self._chat_admin_summary(int(user_id), chat_ids)
+
+    async def _chat_admin_summary(self, user_id: int, chat_ids: set[int]) -> dict:
+        user = await self.user_repo.get_by_telegram_id(user_id) or {}
+        ids = sorted(chat_ids)
+        chats: list[dict] = []
+        if ids:
+            cursor = self.chat_repo.collection.find({"chat_id": {"$in": ids}})
+            async for doc in cursor:
+                row = serialize_doc(doc) or {}
+                cid = int(row["chat_id"])
+                row["broadcast_eligible"] = await self.user_repo.count_broadcast_eligible(
+                    chat_ids=[cid],
+                )
+                row["tracked_members"] = await self.user_repo.count_tracked_in_chats([cid])
+                chats.append(row)
+            chats.sort(key=lambda c: (c.get("title") or "").lower())
+
+        eligible_total = await self.user_repo.count_broadcast_eligible(chat_ids=ids) if ids else 0
+        tracked_total = await self.user_repo.count_tracked_in_chats(ids) if ids else 0
+
+        return {
+            "telegram_id": user_id,
+            "username": user.get("username"),
+            "first_name": user.get("first_name"),
+            "last_name": user.get("last_name"),
+            "status": user.get("status") or "active",
+            "is_active": user.get("is_active", True),
+            "platform_banned": bool(user.get("platform_banned")),
+            "private_chat_started": bool(user.get("private_chat_started")),
+            "chat_count": len(chats),
+            "broadcast_eligible_total": eligible_total,
+            "tracked_members_total": tracked_total,
+            "chats": chats,
+        }
 
     async def log_action(self, admin_id: int, action: str, target: str, payload: dict) -> None:
         await self.db.admin_actions.insert_one({

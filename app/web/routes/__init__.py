@@ -4,6 +4,7 @@ from aiohttp import web
 
 from app.web.middleware.auth import admin_auth_middleware
 from app.web.routes.api import setup_api_routes
+from app.web.services.admin_actions import AdminActionsService
 from app.web.services.admin_query import AdminQueryService
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / 'static'
@@ -32,6 +33,7 @@ def setup_admin_web(app: web.Application, *, settings, user_repo, chat_repo,
         db=db,
         redis_client=redis_client,
     )
+    app['admin_actions'] = AdminActionsService(user_repo, chat_repo, bot=bot)
 
     app.middlewares.insert(0, admin_auth_middleware)
 

@@ -2,11 +2,13 @@ import asyncio
 import random
 from typing import Any, Dict
 import structlog
-from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError, TelegramBadRequest, TelegramAPIError
+from aiogram.exceptions import TelegramRetryAfter, TelegramAPIError
 from app.core.logging import get_logger
 from app.core.config import get_settings
 from app.services.broadcast_admin_notify import notify_broadcast_finished_if_needed
 from app.services.broadcast_targets import collect_recipient_ids
+from app.services.broadcast_send import send_broadcast_payload
+from app.services.broadcast_user_cleanup import remove_user_if_unreachable
 from app.services.broadcast_status_message import refresh_active_broadcast_status_messages, refresh_broadcast_status_message
 
 class BroadcastWorker:
@@ -59,7 +61,9 @@ class BroadcastWorker:
     async def _process_running_jobs(self) -> None:
         """Find and process all running jobs."""
         bot = self.telegram_service.bot
-        await refresh_active_broadcast_status_messages(bot, self.broadcast_repo)
+        await refresh_active_broadcast_status_messages(
+            bot, self.broadcast_repo, settings=get_settings(),
+        )
 
         jobs = await self.broadcast_repo.get_running_jobs()
         for job in jobs:
@@ -118,7 +122,9 @@ class BroadcastWorker:
             await self.broadcast_repo.update_job_status(
                 job_id, 'completed', {'completed_at': __import__('datetime').datetime.utcnow()}
             )
-            await refresh_broadcast_status_message(self.telegram_service.bot, self.broadcast_repo, job_id)
+            await refresh_broadcast_status_message(
+                self.telegram_service.bot, self.broadcast_repo, job_id, settings=get_settings(),
+            )
             await notify_broadcast_finished_if_needed(
                 self.telegram_service.bot, get_settings(), self.broadcast_repo, job_id,
             )
@@ -131,7 +137,9 @@ class BroadcastWorker:
             await self.broadcast_repo.update_job_status(
                 job_id, 'completed', {'completed_at': __import__('datetime').datetime.utcnow()}
             )
-            await refresh_broadcast_status_message(self.telegram_service.bot, self.broadcast_repo, job_id)
+            await refresh_broadcast_status_message(
+                self.telegram_service.bot, self.broadcast_repo, job_id, settings=get_settings(),
+            )
             await notify_broadcast_finished_if_needed(
                 self.telegram_service.bot, get_settings(), self.broadcast_repo, job_id,
             )
@@ -146,18 +154,35 @@ class BroadcastWorker:
                 break
 
             user_id = recipient['user_id']
-            success = await self._send_to_recipient(current_job, {'user_id': user_id})
+            success, reason = await self._send_to_recipient(current_job, {'user_id': user_id})
             if success:
                 await self.broadcast_repo.mark_recipient_sent(job_id, user_id)
                 success_count += 1
             else:
-                await self.broadcast_repo.mark_recipient_failed(job_id, user_id, "send_failed")
+                fail_reason = reason or "send_failed"
+                await self.broadcast_repo.mark_recipient_failed(job_id, user_id, fail_reason)
+                await remove_user_if_unreachable(
+                    self.user_repo,
+                    user_id,
+                    fail_reason,
+                    get_settings(),
+                )
+                if failure_count == 0:
+                    await self.broadcast_repo.collection.update_one(
+                        {"_id": job_id},
+                        {"$set": {"last_send_error_sample": fail_reason}},
+                    )
                 failure_count += 1
 
             await asyncio.sleep(0.04)
 
         await self.broadcast_repo.update_job_progress(job_id, len(batch), success_count, failure_count)
-        await refresh_broadcast_status_message(self.telegram_service.bot, self.broadcast_repo, job_id)
+        await refresh_broadcast_status_message(
+            self.telegram_service.bot,
+            self.broadcast_repo,
+            job_id,
+            settings=get_settings(),
+        )
         self.logger.info(
             'BROADCAST_BATCH_PROCESSED',
             job_id=job_id,
@@ -165,7 +190,7 @@ class BroadcastWorker:
             failure=failure_count,
         )
     
-    async def _send_to_recipient(self, job: dict, recipient: dict) -> bool:
+    async def _send_to_recipient(self, job: dict, recipient: dict) -> tuple[bool, str | None]:
         """Send broadcast message to one recipient."""
         user_id = recipient['user_id']
         payload = job.get('payload', {})
@@ -174,64 +199,29 @@ class BroadcastWorker:
         for attempt in range(max_retries):
             try:
                 await self.rate_limiter.acquire_global()
-
-                bot = self.telegram_service.bot
-                msg_type = payload.get('type', 'text')
-                text = payload.get('text')
-                caption = payload.get('caption')
-                parse_mode = payload.get('parse_mode', 'HTML')
-                reply_markup = payload.get('reply_markup')
-
-                if msg_type == 'photo':
-                    await bot.send_photo(
-                        chat_id=user_id, photo=payload['photo'],
-                        caption=caption, parse_mode=parse_mode,
-                        reply_markup=reply_markup,
-                    )
-                elif msg_type == 'video':
-                    await bot.send_video(
-                        chat_id=user_id, video=payload['video'],
-                        caption=caption, parse_mode=parse_mode,
-                        reply_markup=reply_markup,
-                    )
-                elif msg_type == 'document':
-                    await bot.send_document(
-                        chat_id=user_id, document=payload['document'],
-                        caption=caption, parse_mode=parse_mode,
-                        reply_markup=reply_markup,
-                    )
-                elif msg_type == 'animation':
-                    await bot.send_animation(
-                        chat_id=user_id, animation=payload['animation'],
-                        caption=caption, parse_mode=parse_mode,
-                        reply_markup=reply_markup,
-                    )
-                else:
-                    await bot.send_message(
-                        chat_id=user_id, text=text or "(empty)",
-                        parse_mode=parse_mode, reply_markup=reply_markup,
-                    )
-
-                return True
+                ok, reason = await send_broadcast_payload(
+                    self.telegram_service.bot, user_id, payload,
+                )
+                if ok:
+                    return True, None
+                if reason == "user_blocked_bot":
+                    self.logger.info('USER_BLOCKED_BOT', user_id=user_id)
+                    return False, reason
+                self.logger.warning('BROADCAST_SEND_FAILED', user_id=user_id, reason=reason)
+                return False, reason
 
             except TelegramRetryAfter as e:
                 sleep_time = e.retry_after + random.uniform(0.5, 1.5)
                 self.logger.warning('RATE_LIMIT_RETRY_AFTER', user_id=user_id, sleep_time=sleep_time)
                 await asyncio.sleep(sleep_time)
-            except TelegramForbiddenError:
-                self.logger.info('USER_BLOCKED_BOT', user_id=user_id)
-                return False
-            except TelegramBadRequest as e:
-                self.logger.warning('BAD_REQUEST', user_id=user_id, error=str(e))
-                return False
             except TelegramAPIError as e:
                 self.logger.error('TELEGRAM_API_ERROR', user_id=user_id, error=str(e), attempt=attempt)
                 await asyncio.sleep(1 * (attempt + 1))
             except Exception as e:
                 self.logger.error('UNKNOWN_BROADCAST_ERROR', user_id=user_id, error=str(e), exc_info=True)
-                return False
+                return False, str(e)[:200]
 
-        return False
+        return False, "max_retries"
     
     async def stop(self) -> None:
         self.running = False

@@ -26,6 +26,91 @@ async def list_chats(request: web.Request) -> web.Response:
     return web.json_response(data)
 
 
+async def list_chat_admins(request: web.Request) -> web.Response:
+    params = parse_pagination(request)
+    data = await request.app['admin_query'].list_chat_admins(params)
+    return web.json_response(data)
+
+
+async def get_chat_admin(request: web.Request) -> web.Response:
+    try:
+        user_id = int(request.match_info['user_id'])
+    except ValueError:
+        return web.json_response({'error': 'Invalid user_id'}, status=400)
+    data = await request.app['admin_query'].get_chat_admin(user_id)
+    if not data:
+        return web.json_response({'error': 'Not found'}, status=404)
+    return web.json_response(data)
+
+
+async def patch_user(request: web.Request) -> web.Response:
+    try:
+        telegram_id = int(request.match_info['telegram_id'])
+    except ValueError:
+        return web.json_response({'error': 'Invalid telegram_id'}, status=400)
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return web.json_response({'error': 'Invalid JSON'}, status=400)
+    action = (body.get('action') or '').strip().lower()
+    actions = request.app['admin_actions']
+    settings = request.app['settings']
+    try:
+        if action == 'ban':
+            await actions.ban_user(telegram_id, settings)
+        elif action == 'unban':
+            await actions.unban_user(telegram_id)
+        else:
+            return web.json_response({'error': 'Unknown action'}, status=400)
+    except ValueError as e:
+        return web.json_response({'error': str(e)}, status=400)
+
+    await request.app['admin_query'].log_action(
+        admin_id=0,
+        action=f'user_{action}',
+        target=str(telegram_id),
+        payload=body,
+    )
+    user = await request.app['admin_query'].user_repo.get_by_telegram_id(telegram_id)
+    from app.web.utils import serialize_doc
+    return web.json_response(serialize_doc(user) or {'telegram_id': telegram_id})
+
+
+async def patch_chat(request: web.Request) -> web.Response:
+    try:
+        chat_id = int(request.match_info['chat_id'])
+    except ValueError:
+        return web.json_response({'error': 'Invalid chat_id'}, status=400)
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return web.json_response({'error': 'Invalid JSON'}, status=400)
+    action = (body.get('action') or '').strip().lower()
+    actions = request.app['admin_actions']
+    try:
+        if action == 'disconnect':
+            await actions.disconnect_chat(chat_id)
+        elif action == 'reconnect':
+            await actions.reconnect_chat(chat_id)
+        elif action == 'leave':
+            await actions.leave_chat(chat_id)
+        else:
+            return web.json_response({'error': 'Unknown action'}, status=400)
+    except ValueError as e:
+        return web.json_response({'error': str(e)}, status=400)
+
+    await request.app['admin_query'].log_action(
+        admin_id=0,
+        action=f'chat_{action}',
+        target=str(chat_id),
+        payload=body,
+    )
+    data = await request.app['admin_query'].get_chat(chat_id)
+    if not data:
+        return web.json_response({'ok': True, 'chat_id': chat_id})
+    return web.json_response(data)
+
+
 async def get_chat(request: web.Request) -> web.Response:
     raw = request.match_info['chat_id']
     try:
@@ -177,6 +262,10 @@ def setup_api_routes(app: web.Application) -> None:
     app.router.add_get('/api/admin/users', list_users)
     app.router.add_get('/api/admin/chats', list_chats)
     app.router.add_get('/api/admin/chats/{chat_id}', get_chat)
+    app.router.add_patch('/api/admin/chats/{chat_id}', patch_chat)
+    app.router.add_get('/api/admin/chat-admins', list_chat_admins)
+    app.router.add_get('/api/admin/chat-admins/{user_id}', get_chat_admin)
+    app.router.add_patch('/api/admin/users/{telegram_id}', patch_user)
     app.router.add_get('/api/admin/bot', bot_info)
     app.router.add_get('/api/admin/join-requests', list_join_requests)
     app.router.add_get('/api/admin/broadcasts', list_broadcasts)

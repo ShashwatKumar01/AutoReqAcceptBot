@@ -6,10 +6,14 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 router = Router()
 
 
-async def get_real_stats(chat_id: int, chat_repo, join_request_repo):
+async def get_real_stats(chat_id: int, chat_repo, join_request_repo, user_repo=None):
     chat = await chat_repo.get(chat_id)
     if not chat:
         return None
+
+    broadcast_eligible = 0
+    if user_repo:
+        broadcast_eligible = await user_repo.count_broadcast_eligible(chat_ids=[chat_id])
 
     total_reqs = await join_request_repo.collection.count_documents({"chat_id": chat_id})
     approved_reqs = await join_request_repo.collection.count_documents(
@@ -23,7 +27,7 @@ async def get_real_stats(chat_id: int, chat_repo, join_request_repo):
     )
     welcome_sent = chat.get('total_welcome_sent', 0)
 
-    return chat, total_reqs, approved_reqs, pending_reqs, declined_reqs, welcome_sent
+    return chat, total_reqs, approved_reqs, pending_reqs, declined_reqs, welcome_sent, broadcast_eligible
 
 
 def _chat_type_label(chat: dict) -> str:
@@ -36,27 +40,30 @@ def _chat_type_label(chat: dict) -> str:
 
 
 async def _format_channel_stats(chat: dict, stats) -> str:
-    chat, total_reqs, approved_reqs, pending_reqs, declined_reqs, welcome_sent = stats
+    chat, total_reqs, approved_reqs, pending_reqs, declined_reqs, welcome_sent, broadcast_eligible = stats
     title = chat.get("title", "Unknown")
     chat_type = _chat_type_label(chat)
     return (
         f"<b>{title}</b> ({chat_type})\n"
         f"  Requests: {total_reqs} | Approved: {approved_reqs} | "
         f"Pending: {pending_reqs} | Declined: {declined_reqs}\n"
-        f"  Welcome sent: {welcome_sent}"
+        f"  Welcome sent: {welcome_sent} | Broadcast eligible: {broadcast_eligible}"
     )
 
 
-async def _build_overview_text(chats: list, chat_repo, join_request_repo) -> str:
+async def _build_overview_text(chats: list, chat_repo, join_request_repo, user_repo=None) -> str:
     lines = ["📊 <b>Statistics — All Channels</b>\n"]
-    totals = {"requests": 0, "approved": 0, "pending": 0, "declined": 0, "welcome": 0}
+    totals = {
+        "requests": 0, "approved": 0, "pending": 0, "declined": 0,
+        "welcome": 0, "broadcast_eligible": 0,
+    }
 
     for c in chats:
         chat_id = c["chat_id"]
-        res = await get_real_stats(chat_id, chat_repo, join_request_repo)
+        res = await get_real_stats(chat_id, chat_repo, join_request_repo, user_repo)
         if not res:
             continue
-        chat, total_reqs, approved_reqs, pending_reqs, declined_reqs, welcome_sent = res
+        chat, total_reqs, approved_reqs, pending_reqs, declined_reqs, welcome_sent, _be = res
         totals["requests"] += total_reqs
         totals["approved"] += approved_reqs
         totals["pending"] += pending_reqs
@@ -65,11 +72,16 @@ async def _build_overview_text(chats: list, chat_repo, join_request_repo) -> str
         lines.append(await _format_channel_stats(chat, res))
         lines.append("")
 
+    if user_repo and chats:
+        totals["broadcast_eligible"] = await user_repo.count_broadcast_eligible(
+            chat_ids=[c["chat_id"] for c in chats],
+        )
+
     lines.append(
         "<b>Total across all channels:</b>\n"
         f"Requests: {totals['requests']} | Approved: {totals['approved']} | "
         f"Pending: {totals['pending']} | Declined: {totals['declined']}\n"
-        f"Welcome sent: {totals['welcome']}"
+        f"Welcome sent: {totals['welcome']} | Broadcast eligible: {totals['broadcast_eligible']}"
     )
     return "\n".join(lines)
 
@@ -88,7 +100,7 @@ def _stats_keyboard(chats: list, show_overview: bool = True) -> InlineKeyboardBu
 
 
 @router.message(Command('stats'))
-async def stats_command(message: Message, chat_repo, join_request_repo):
+async def stats_command(message: Message, chat_repo, join_request_repo, user_repo):
     user_id = message.from_user.id
     chats = await chat_repo.get_by_admin(user_id)
 
@@ -97,14 +109,14 @@ async def stats_command(message: Message, chat_repo, join_request_repo):
 
     if len(chats) == 1:
         chat_id = chats[0]['chat_id']
-        await show_stats(message, chat_id, chat_repo, join_request_repo, multi_chat=False)
+        await show_stats(message, chat_id, chat_repo, join_request_repo, user_repo, multi_chat=False)
     else:
-        text = await _build_overview_text(chats, chat_repo, join_request_repo)
+        text = await _build_overview_text(chats, chat_repo, join_request_repo, user_repo)
         await message.answer(text, reply_markup=_stats_keyboard(chats).as_markup())
 
 
 @router.callback_query(F.data == 'menu:stats')
-async def stats_menu(callback: CallbackQuery, chat_repo, join_request_repo):
+async def stats_menu(callback: CallbackQuery, chat_repo, join_request_repo, user_repo):
     user_id = callback.from_user.id
     chats = await chat_repo.get_by_admin(user_id)
     if not chats:
@@ -112,35 +124,35 @@ async def stats_menu(callback: CallbackQuery, chat_repo, join_request_repo):
 
     if len(chats) == 1:
         chat_id = chats[0]['chat_id']
-        await show_stats_cb(callback, chat_id, chat_repo, join_request_repo, multi_chat=False)
+        await show_stats_cb(callback, chat_id, chat_repo, join_request_repo, user_repo, multi_chat=False)
     else:
-        text = await _build_overview_text(chats, chat_repo, join_request_repo)
+        text = await _build_overview_text(chats, chat_repo, join_request_repo, user_repo)
         await callback.message.edit_text(text, reply_markup=_stats_keyboard(chats).as_markup())
     await callback.answer()
 
 
 @router.callback_query(F.data == 'stats:overview')
-async def stats_overview_callback(callback: CallbackQuery, chat_repo, join_request_repo):
+async def stats_overview_callback(callback: CallbackQuery, chat_repo, join_request_repo, user_repo):
     user_id = callback.from_user.id
     chats = await chat_repo.get_by_admin(user_id)
     if not chats:
         return await callback.answer("No connected chats.", show_alert=True)
-    text = await _build_overview_text(chats, chat_repo, join_request_repo)
+    text = await _build_overview_text(chats, chat_repo, join_request_repo, user_repo)
     await callback.message.edit_text(text, reply_markup=_stats_keyboard(chats).as_markup())
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith('stats:chat:'))
-async def chat_stats_callback(callback: CallbackQuery, chat_repo, join_request_repo):
+async def chat_stats_callback(callback: CallbackQuery, chat_repo, join_request_repo, user_repo):
     chat_id = int(callback.data.split(':')[2])
-    await show_stats_cb(callback, chat_id, chat_repo, join_request_repo)
+    await show_stats_cb(callback, chat_id, chat_repo, join_request_repo, user_repo)
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith('stats:refresh:'))
-async def refresh_stats(callback: CallbackQuery, chat_repo, join_request_repo):
+async def refresh_stats(callback: CallbackQuery, chat_repo, join_request_repo, user_repo):
     chat_id = int(callback.data.split(':')[2])
-    await show_stats_cb(callback, chat_id, chat_repo, join_request_repo)
+    await show_stats_cb(callback, chat_id, chat_repo, join_request_repo, user_repo)
     await callback.answer("Stats refreshed!")
 
 
@@ -154,12 +166,19 @@ def _single_chat_keyboard(chat_id: int, multi_chat: bool) -> InlineKeyboardBuild
     return b
 
 
-async def show_stats(message: Message, chat_id: int, chat_repo, join_request_repo, multi_chat: bool = False):
-    res = await get_real_stats(chat_id, chat_repo, join_request_repo)
+async def show_stats(
+    message: Message,
+    chat_id: int,
+    chat_repo,
+    join_request_repo,
+    user_repo=None,
+    multi_chat: bool = False,
+):
+    res = await get_real_stats(chat_id, chat_repo, join_request_repo, user_repo)
     if not res:
         return await message.answer("Chat not found.")
 
-    chat, total_reqs, approved_reqs, pending_reqs, declined_reqs, welcome_sent = res
+    chat, total_reqs, approved_reqs, pending_reqs, declined_reqs, welcome_sent, broadcast_eligible = res
     chat_type = _chat_type_label(chat)
 
     text = (
@@ -169,18 +188,26 @@ async def show_stats(message: Message, chat_id: int, chat_repo, join_request_rep
         f"Approved: {approved_reqs}\n"
         f"Pending: {pending_reqs}\n"
         f"Declined: {declined_reqs}\n"
-        f"Welcome Messages Sent: {welcome_sent}"
+        f"Welcome Messages Sent: {welcome_sent}\n"
+        f"Broadcast eligible (DM /start): {broadcast_eligible}"
     )
 
     await message.answer(text, reply_markup=_single_chat_keyboard(chat_id, multi_chat).as_markup())
 
 
-async def show_stats_cb(callback: CallbackQuery, chat_id: int, chat_repo, join_request_repo, multi_chat: bool = True):
-    res = await get_real_stats(chat_id, chat_repo, join_request_repo)
+async def show_stats_cb(
+    callback: CallbackQuery,
+    chat_id: int,
+    chat_repo,
+    join_request_repo,
+    user_repo=None,
+    multi_chat: bool = True,
+):
+    res = await get_real_stats(chat_id, chat_repo, join_request_repo, user_repo)
     if not res:
         return await callback.answer("Chat not found.")
 
-    chat, total_reqs, approved_reqs, pending_reqs, declined_reqs, welcome_sent = res
+    chat, total_reqs, approved_reqs, pending_reqs, declined_reqs, welcome_sent, broadcast_eligible = res
     chat_type = _chat_type_label(chat)
 
     text = (
@@ -190,7 +217,8 @@ async def show_stats_cb(callback: CallbackQuery, chat_id: int, chat_repo, join_r
         f"Approved: {approved_reqs}\n"
         f"Pending: {pending_reqs}\n"
         f"Declined: {declined_reqs}\n"
-        f"Welcome Messages Sent: {welcome_sent}"
+        f"Welcome Messages Sent: {welcome_sent}\n"
+        f"Broadcast eligible (DM /start): {broadcast_eligible}"
     )
 
     await callback.message.edit_text(

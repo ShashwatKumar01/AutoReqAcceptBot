@@ -1,8 +1,13 @@
+import html
+
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
+from aiogram.filters.command import CommandObject
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from app.core.deep_links import parse_welcome_start
 from ..keyboards.main_menu import main_menu_keyboard, welcome_start_keyboard
 from ..keyboards.help_menu import help_keyboard
 from ..keyboards.styled import STYLE_PRIMARY
@@ -60,9 +65,46 @@ def _start_keyboard(has_chats: bool, bot_username: str, is_super_admin: bool):
     return builder.as_markup()
 
 
+async def _send_welcome_unlock_teaser(
+    message: Message,
+    chat_id: int,
+    chat_repo,
+    user_repo,
+    from_user,
+) -> None:
+    chat_doc = await chat_repo.get(chat_id)
+    if not chat_doc or chat_doc.get("status") == "disconnected":
+        await message.answer(
+            "This link is no longer valid — the chat was removed from the bot.",
+        )
+        return
+
+    title = html.escape(chat_doc.get("title") or "Channel")
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔒 Unlock it now", callback_data=f"wel:unlock:{chat_id}")
+
+    await user_repo.upsert({
+        "telegram_id": from_user.id,
+        "username": from_user.username,
+        "first_name": from_user.first_name or "",
+        "last_name": from_user.last_name,
+        "language_code": getattr(from_user, "language_code", None),
+        "is_bot": False,
+        "is_active": True,
+        "chat_id": chat_id,
+        "private_chat_started": True,
+    })
+
+    await message.answer(
+        f"<b>{title}</b> sent you a private message.\nClick below and see. 👇",
+        reply_markup=builder.as_markup(),
+    )
+
+
 @router.message(CommandStart())
 async def start_handler(
     message: Message,
+    command: CommandObject,
     state: FSMContext,
     user_repo,
     chat_repo,
@@ -75,6 +117,13 @@ async def start_handler(
     2. /start is intentionally minimal — only "Add to Group / Add to Channel".
        Use 📋 Open Menu (or /menu) for the full setup.
     """
+    wel_chat_id = parse_welcome_start(command.args)
+    if wel_chat_id is not None:
+        await _send_welcome_unlock_teaser(
+            message, wel_chat_id, chat_repo, user_repo, message.from_user,
+        )
+        return
+
     user_id = message.from_user.id
     chats = await chat_repo.get_by_admin(user_id)
     has_chats = bool(chats)
@@ -98,6 +147,43 @@ async def start_handler(
         url = get_settings().admin_web_url
         text += f"\n🌐 Web: <code>{url}</code>"
     await message.answer(text, reply_markup=_start_keyboard(has_chats, bot_username, is_super_admin))
+
+
+@router.callback_query(F.data.startswith("wel:unlock:"))
+async def welcome_unlock_callback(
+    callback: CallbackQuery,
+    chat_repo,
+    welcome_service,
+    join_request_repo,
+):
+    raw = (callback.data or "").split(":", 2)[-1]
+    try:
+        chat_id = int(raw)
+    except ValueError:
+        await callback.answer("Invalid link.", show_alert=True)
+        return
+
+    user_id = callback.from_user.id
+    jr = await join_request_repo.collection.find_one(
+        {"user_id": user_id, "chat_id": chat_id},
+    )
+    if not jr:
+        await callback.answer(
+            "No join request found for this chat. Request access first, then use the link again.",
+            show_alert=True,
+        )
+        return
+
+    ok = await welcome_service.deliver_welcome(
+        user_id, chat_id, callback.from_user, request_doc=jr,
+    )
+    if ok:
+        await callback.answer("Unlocked ✅")
+    else:
+        await callback.answer(
+            "Nothing to show yet — ask the chat owner to set a welcome message, or try again later.",
+            show_alert=True,
+        )
 
 
 @router.callback_query(F.data == "menu:open")

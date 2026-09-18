@@ -14,11 +14,15 @@ class UserRepository:
         # If a chat_id is provided, also track it on the user so
         # broadcast can target users by chat.
         chat_id = user_data.pop('chat_id', None)
+        private_chat = user_data.pop('private_chat_started', None)
 
+        fields = {k: v for k, v in user_data.items() if k != 'telegram_id'}
         update_doc = {
-            "$set": {k: v for k, v in user_data.items() if k != 'telegram_id'},
-            "$setOnInsert": {"created_at": now}
+            "$set": fields,
+            "$setOnInsert": {"created_at": now},
         }
+        if private_chat is True:
+            update_doc["$set"]["private_chat_started"] = True
         if chat_id is not None:
             update_doc["$addToSet"] = {"chat_ids": int(chat_id)}
 
@@ -41,6 +45,23 @@ class UserRepository:
 
     async def count_total(self) -> int:
         return await self.collection.count_documents({})
+
+    async def count_broadcast_eligible(self, *, chat_ids: list[int] | None = None) -> int:
+        """Users who opened the bot in DM (/start) and can receive broadcasts."""
+        query: Dict[str, Any] = {"private_chat_started": True}
+        if chat_ids is not None:
+            if not chat_ids:
+                return 0
+            query["chat_ids"] = {"$in": [int(c) for c in chat_ids]}
+        return await self.collection.count_documents(query)
+
+    async def count_tracked_in_chats(self, chat_ids: list[int]) -> int:
+        """Users stored for these chats (may not have started DM yet)."""
+        if not chat_ids:
+            return 0
+        return await self.collection.count_documents(
+            {"chat_ids": {"$in": [int(c) for c in chat_ids]}},
+        )
 
     async def count(self) -> int:
         return await self.count_total()
@@ -77,3 +98,7 @@ class UserRepository:
             {"$set": {"is_super_admin": value}}
         )
         return result.modified_count > 0
+
+    async def delete_by_telegram_id(self, telegram_id: int) -> bool:
+        result = await self.collection.delete_one({"telegram_id": int(telegram_id)})
+        return result.deleted_count > 0

@@ -6,6 +6,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.database.repositories import JoinRequestRepository, ChatRepository
 from app.services.telegram_service import TelegramService
+from app.core.deep_links import welcome_deeplink
 from app.core.logging import get_logger
 from app.core.utils import utcnow
 
@@ -90,6 +91,20 @@ class WelcomeService:
         # on_approval → send immediately
         await self._send(user_id, chat_id, from_user, ws, request_doc)
 
+    async def deliver_welcome(
+        self,
+        user_id: int,
+        chat_id: int,
+        from_user,
+        *,
+        request_doc: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Send configured welcome DM (used after unlock deep-link)."""
+        ws = await self._load_settings(chat_id)
+        if not ws.get("welcome_enabled", True):
+            return False
+        return await self._send(user_id, chat_id, from_user, ws, request_doc)
+
     async def process_due_welcome_messages(self, now: datetime) -> int:
         """
         Worker-side: find scheduled welcomes whose time has come and send them.
@@ -158,7 +173,8 @@ class WelcomeService:
     ) -> bool:
         """Build and send the welcome message. Returns True on success."""
         chat_doc = await self.chat_repo.get(chat_id) or {}
-        text = self._substitute(ws["welcome_text"], from_user, chat_doc)
+        unlock_link = await self._unlock_link_for_chat(chat_id)
+        text = self._substitute(ws["welcome_text"], from_user, chat_doc, unlock_link=unlock_link)
         keyboard = self._build_keyboard(ws["welcome_buttons"])
         media_id = ws.get("welcome_media_file_id", "")
         media_type = ws.get("welcome_media_type", "photo")
@@ -262,8 +278,26 @@ class WelcomeService:
         )
         return ok
 
+    async def _unlock_link_for_chat(self, chat_id: int) -> str:
+        bot: Bot | None = getattr(self.telegram_service, "bot", None)
+        if not bot:
+            return ""
+        try:
+            me = await bot.get_me()
+            if me.username:
+                return welcome_deeplink(me.username, chat_id)
+        except Exception:
+            pass
+        return ""
+
     @staticmethod
-    def _substitute(template: str, from_user, chat_doc: Dict[str, Any]) -> str:
+    def _substitute(
+        template: str,
+        from_user,
+        chat_doc: Dict[str, Any],
+        *,
+        unlock_link: str = "",
+    ) -> str:
         """Replace {variables} in template. Handles missing keys safely."""
         if not template:
             return ""
@@ -281,6 +315,9 @@ class WelcomeService:
             .replace("{user_id}", uid)
             .replace("{chat_title}", chat_title)
             .replace("{chat_username}", f"@{chat_uname}" if chat_uname else chat_title)
+            .replace("{channel}", chat_title)
+            .replace("{unlock_link}", unlock_link)
+            .replace("{bot_link}", unlock_link)
         )
 
     @staticmethod

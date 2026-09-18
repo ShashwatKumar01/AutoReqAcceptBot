@@ -16,7 +16,7 @@ from app.services.broadcast_status_message import (
     format_broadcast_status_text,
     refresh_broadcast_status_message,
 )
-from app.services.broadcast_targets import estimate_recipients, TARGET_LABELS
+from app.services.broadcast_targets import audience_summary, format_audience_lines, TARGET_LABELS
 from ..keyboards.broadcast_menu import (
     broadcast_picker_keyboard,
     broadcast_confirm_keyboard,
@@ -63,7 +63,8 @@ async def _start_broadcast_picker(message_or_callback, state: FSMContext, chat_r
         text = (
             "📢 <b>Broadcast</b>\n\n"
             "Choose <b>your group or channel</b>. "
-            "Approved members who have <b>/start</b>ed this bot will get a private DM.\n"
+            "Only members who opened this bot in <b>private chat</b> and tapped <b>/start</b> "
+            "can receive a DM.\n"
             "<i>Nothing is posted inside the group.</i>"
         )
     kb = broadcast_picker_keyboard(chats, is_super_admin=is_super_admin)
@@ -218,7 +219,7 @@ async def receive_broadcast_message(
     target_id = data.get('target_id')
     scope = data.get('chat_scope_owner_id')
 
-    estimate = await estimate_recipients(
+    summary = await audience_summary(
         target,
         chat_scope_owner_id=scope,
         target_id=target_id,
@@ -226,8 +227,9 @@ async def receive_broadcast_message(
         chat_repo=chat_repo,
         join_request_repo=join_request_repo,
     )
+    estimate = summary["eligible"]
 
-    await state.update_data(estimate=estimate)
+    await state.update_data(estimate=estimate, audience_summary=summary)
     await state.set_state(BroadcastStates.confirming)
 
     job_id = str(uuid.uuid4())
@@ -239,7 +241,7 @@ async def receive_broadcast_message(
     text = (
         f"📊 <b>Broadcast Summary</b>\n\n"
         f"Target: {label}\n"
-        f"Estimated recipients: <b>{estimate}</b>\n\n"
+        f"{format_audience_lines(summary)}\n\n"
         "Start sending?"
     )
     await message.answer(text, reply_markup=broadcast_confirm_keyboard(job_id))
@@ -315,6 +317,9 @@ async def confirm_broadcast(
     await notify_broadcast_started(
         callback.bot, settings, job, callback.from_user.id,
     )
+    await refresh_broadcast_status_message(
+        callback.bot, broadcast_repo, job_id, settings=settings,
+    )
     await callback.answer()
 
 
@@ -329,21 +334,27 @@ async def cancel_broadcast_flow(callback: CallbackQuery, state: FSMContext):
 async def pause_via_button(callback: CallbackQuery, broadcast_repo):
     job_id = callback.data.split(':')[2]
     await broadcast_repo.update_job_status(job_id, 'paused')
-    await refresh_broadcast_status_message(callback.bot, broadcast_repo, job_id)
+    await refresh_broadcast_status_message(
+        callback.bot, broadcast_repo, job_id, settings=get_settings(),
+    )
     await callback.answer("Paused")
 
 @router.callback_query(F.data.startswith('broadcast:resume:'))
 async def resume_via_button(callback: CallbackQuery, broadcast_repo):
     job_id = callback.data.split(':')[2]
     await broadcast_repo.update_job_status(job_id, 'running')
-    await refresh_broadcast_status_message(callback.bot, broadcast_repo, job_id)
+    await refresh_broadcast_status_message(
+        callback.bot, broadcast_repo, job_id, settings=get_settings(),
+    )
     await callback.answer("Resumed")
 
 @router.callback_query(F.data.startswith('broadcast:cancel:'))
 async def cancel_via_button(callback: CallbackQuery, broadcast_repo):
     job_id = callback.data.split(':')[2]
     await broadcast_repo.update_job_status(job_id, 'cancelled')
-    await refresh_broadcast_status_message(callback.bot, broadcast_repo, job_id)
+    await refresh_broadcast_status_message(
+        callback.bot, broadcast_repo, job_id, settings=get_settings(),
+    )
     await notify_broadcast_finished_if_needed(
         callback.bot, get_settings(), broadcast_repo, job_id,
     )
@@ -355,5 +366,7 @@ async def refresh_broadcast_status(callback: CallbackQuery, broadcast_repo):
     job = await broadcast_repo.get_job(job_id)
     if not job:
         return await callback.answer("Job not found.")
-    await refresh_broadcast_status_message(callback.bot, broadcast_repo, job_id)
+    await refresh_broadcast_status_message(
+        callback.bot, broadcast_repo, job_id, settings=get_settings(),
+    )
     await callback.answer("Refreshed!")

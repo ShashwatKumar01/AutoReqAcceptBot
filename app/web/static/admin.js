@@ -7,6 +7,7 @@ const state = {
     chats: { page: 1, q: '', status: '', type: '', sort: 'created_at', order: 'desc' },
     requests: { page: 1, q: '', status: '', chat_id: '', sort: 'created_at', order: 'desc' },
     broadcasts: { page: 1, status: '', owner_id: '', sort: 'created_at', order: 'desc' },
+    chatAdmins: { page: 1, q: '', sort: 'telegram_id', order: 'desc' },
   },
 };
 
@@ -54,6 +55,7 @@ function switchTab(name) {
     requests: 'Join Requests',
     broadcasts: 'Broadcasts',
     'create-broadcast': 'New Broadcast',
+    'chat-admins': 'Chat admins',
   };
   $('#page-title').textContent = titles[name] || name;
   loadCurrentTab();
@@ -65,6 +67,7 @@ async function loadCurrentTab() {
     else if (state.tab === 'bot') await loadBot();
     else if (state.tab === 'users') await loadUsers();
     else if (state.tab === 'chats') await loadChats();
+    else if (state.tab === 'chat-admins') await loadChatAdmins();
     else if (state.tab === 'requests') await loadRequests();
     else if (state.tab === 'broadcasts') await loadBroadcasts();
   } catch (e) {
@@ -84,7 +87,7 @@ function renderCards(stats) {
   const redisUses = (sys.redis_used_for || []).join(' · ');
   el.innerHTML = `
     <div class="card"><h3>Users</h3><div class="value">${stats.users.total}</div>
-      <div class="sub">${stats.users.active} active · +${stats.users.new_today} today</div></div>
+      <div class="sub">${stats.users.active} active · ${stats.users.broadcast_eligible ?? 0} broadcast eligible · +${stats.users.new_today} today</div></div>
     <div class="card"><h3>Chats</h3><div class="value">${stats.chats.total}</div>
       <div class="sub">${stats.chats.connected} connected · ${stats.chats.channels} channels</div></div>
     <div class="card"><h3>Join Requests</h3><div class="value">${stats.join_requests.total}</div>
@@ -165,6 +168,76 @@ async function loadBot() {
   renderBotDetail(bot);
 }
 
+function chatActionButtons(chatId, status, compact = false) {
+  const disconnected = status === 'disconnected';
+  const cls = compact ? 'btn sm' : 'btn sm';
+  return `
+    <span class="actions-inline" data-chat-actions="${chatId}">
+      ${disconnected
+        ? `<button type="button" class="${cls}" data-chat-act="reconnect" data-chat-id="${chatId}">Reconnect</button>`
+        : `<button type="button" class="${cls}" data-chat-act="disconnect" data-chat-id="${chatId}">Disconnect</button>`}
+      <button type="button" class="${cls} danger" data-chat-act="leave" data-chat-id="${chatId}">Leave group</button>
+    </span>`;
+}
+
+async function runChatAction(chatId, action) {
+  const label = { disconnect: 'Disconnect this chat in the panel?', leave: 'Make the bot leave this chat on Telegram?', reconnect: 'Mark chat as connected again?' };
+  if (!confirm(label[action] || 'Continue?')) return;
+  await api(`/api/admin/chats/${chatId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ action }),
+  });
+  if (state.tab === 'chats') {
+    const open = $('#chat-detail')?.dataset?.openChatId;
+    if (open && String(open) === String(chatId)) await showChatDetail(chatId);
+    else await loadChats();
+  } else if (state.tab === 'chat-admins') {
+    const openAdmin = $('#chat-admin-detail')?.dataset?.openAdminId;
+    if (openAdmin) await showChatAdminDetail(openAdmin);
+    else await loadChatAdmins();
+  }
+}
+
+function bindChatActionButtons(root = document) {
+  root.querySelectorAll('[data-chat-act]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        await runChatAction(btn.dataset.chatId, btn.dataset.chatAct);
+      } catch (err) {
+        alert(err.message || 'Action failed');
+      }
+    });
+  });
+}
+
+async function runUserBanAction(telegramId, action) {
+  const verb = action === 'ban' ? 'Ban this user from the platform?' : 'Unban this user?';
+  if (!confirm(verb)) return;
+  await api(`/api/admin/users/${telegramId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ action }),
+  });
+  if (state.tab === 'chat-admins') {
+    const open = $('#chat-admin-detail')?.dataset?.openAdminId;
+    if (open) await showChatAdminDetail(open);
+    else await loadChatAdmins();
+  } else if (state.tab === 'users') await loadUsers();
+}
+
+function bindUserBanButtons(root = document) {
+  root.querySelectorAll('[data-user-ban]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        await runUserBanAction(btn.dataset.userId, btn.dataset.userBan);
+      } catch (err) {
+        alert(err.message || 'Action failed');
+      }
+    });
+  });
+}
+
 function renderButtonsList(buttons) {
   if (!buttons || !buttons.length) return '<em style="color:var(--muted)">No buttons</em>';
   return `<ul class="btn-list">${buttons.map((b, i) =>
@@ -177,17 +250,22 @@ function renderChatDetail(data) {
   const w = data.welcome || {};
   const g = data.goodbye || {};
   const a = data.approval || {};
+  const aud = data.audience || {};
   const panel = $('#chat-detail');
   panel.classList.remove('hidden');
+  panel.dataset.openChatId = c.chat_id;
   panel.innerHTML = `
     <h3>💬 ${esc(c.title || 'Chat')} <code>${c.chat_id}</code></h3>
     <button type="button" class="btn sm" id="chat-detail-close">Close</button>
+    <p class="form-hint" style="margin:.5rem 0">${chatActionButtons(c.chat_id, c.status || 'unknown')}</p>
     <div class="settings-grid">
       <div class="kv"><b>Chat ID</b><code>${c.chat_id}</code></div>
       <div class="kv"><b>Type</b>${esc(c.type || '—')}</div>
       <div class="kv"><b>Status</b>${statusPill(c.status || 'unknown')}</div>
       <div class="kv"><b>Owner admin ID</b>${c.admin_id ?? '—'}</div>
       <div class="kv"><b>Linked admin IDs</b>${(data.admin_user_ids || []).join(', ') || '—'}</div>
+      <div class="kv"><b>Broadcast eligible</b>${aud.broadcast_eligible ?? 0}</div>
+      <div class="kv"><b>Tracked members</b>${aud.tracked_members ?? 0}</div>
       <div class="kv"><b>Approved members</b>${c.total_approved ?? 0}</div>
       <div class="kv"><b>Join requests</b>${c.total_join_requests ?? 0}</div>
       <div class="kv"><b>Welcome sent</b>${c.total_welcome_sent ?? 0}</div>
@@ -227,7 +305,11 @@ function renderChatDetail(data) {
     <h4>All stored settings (raw)</h4>
     <pre class="settings-pre">${esc(JSON.stringify(data.settings_raw, null, 2))}</pre>
   `;
-  $('#chat-detail-close')?.addEventListener('click', () => panel.classList.add('hidden'));
+  $('#chat-detail-close')?.addEventListener('click', () => {
+    panel.classList.add('hidden');
+    delete panel.dataset.openChatId;
+  });
+  bindChatActionButtons(panel);
 }
 
 async function showChatDetail(chatId) {
@@ -248,6 +330,7 @@ function buildQuery(table) {
   if (s.type) p.set('type', s.type);
   if (s.chat_id) p.set('chat_id', s.chat_id);
   if (s.owner_id) p.set('owner_id', s.owner_id);
+  if (table === 'chatAdmins' && s.q) p.set('q', s.q);
   return p.toString();
 }
 
@@ -289,15 +372,25 @@ function progressBar(p) {
 
 async function loadUsers() {
   const data = await api(`/api/admin/users?${buildQuery('users')}`);
-  const rows = data.items.map(u => `<tr>
+  const rows = data.items.map(u => {
+    const blocked = (u.status === 'blocked') || u.platform_banned;
+    return `<tr>
     <td>${u.telegram_id}</td>
     <td>@${u.username || '—'}</td>
     <td>${u.first_name || ''} ${u.last_name || ''}</td>
     <td>${statusPill(u.status || 'active')}</td>
+    <td>${u.private_chat_started ? '✅' : '—'}</td>
     <td>${(u.chat_ids || []).length}</td>
     <td>${fmtDate(u.created_at)}</td>
-  </tr>`);
-  renderTable('users-table', ['ID', 'Username', 'Name', 'Status', 'Chats', 'Created'], rows);
+    <td class="actions">
+      ${blocked
+        ? `<button type="button" class="btn sm" data-user-ban="unban" data-user-id="${u.telegram_id}">Unban</button>`
+        : `<button type="button" class="btn sm danger" data-user-ban="ban" data-user-id="${u.telegram_id}">Ban</button>`}
+    </td>
+  </tr>`;
+  });
+  renderTable('users-table', ['ID', 'Username', 'Name', 'Status', 'DM /start', 'Chats', 'Created', ''], rows);
+  bindUserBanButtons();
   renderPager('users', data);
 }
 
@@ -313,13 +406,19 @@ async function loadChats() {
     <td>${s.auto_approval ? '✅' : '❌'} ${s.approval_delay_seconds ? `(${s.approval_delay_seconds}s)` : ''}</td>
     <td>${s.welcome_enabled ? '✅' : '❌'} · ${s.welcome_buttons_count || 0} btn</td>
     <td>${s.goodbye_enabled ? '✅' : '❌'}</td>
+    <td>${c.broadcast_eligible ?? 0}</td>
+    <td>${c.tracked_members ?? 0}</td>
     <td>${c.total_approved || 0}</td>
-    <td><button type="button" class="btn sm" data-chat-view="${c.chat_id}">View</button></td>
+    <td class="actions">
+      <button type="button" class="btn sm" data-chat-view="${c.chat_id}">View</button>
+      ${chatActionButtons(c.chat_id, c.status || 'unknown', true)}
+    </td>
   </tr>`;
   });
   renderTable('chats-table',
-    ['Chat ID', 'Title', 'Type', 'Status', 'Auto-approve', 'Welcome', 'Goodbye', 'Approved', ''],
+    ['Chat ID', 'Title', 'Type', 'Status', 'Auto-approve', 'Welcome', 'Goodbye', 'Eligible', 'Tracked', 'Approved', 'Actions'],
     rows);
+  bindChatActionButtons($('#chats-table'));
   $all('[data-chat-view]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -330,6 +429,82 @@ async function loadChats() {
     tr.addEventListener('click', () => showChatDetail(tr.dataset.chatId));
   });
   renderPager('chats', data);
+}
+
+function renderChatAdminDetail(data) {
+  const panel = $('#chat-admin-detail');
+  panel.classList.remove('hidden');
+  panel.dataset.openAdminId = data.telegram_id;
+  const blocked = data.status === 'blocked' || data.platform_banned;
+  const chatRows = (data.chats || []).map(c => `<tr>
+    <td><code>${c.chat_id}</code></td>
+    <td>${esc(c.title || '—')}</td>
+    <td>${statusPill(c.status || 'unknown')}</td>
+    <td>${c.broadcast_eligible ?? 0}</td>
+    <td>${c.tracked_members ?? 0}</td>
+    <td class="actions">${chatActionButtons(c.chat_id, c.status || 'unknown', true)}</td>
+  </tr>`).join('');
+
+  panel.innerHTML = `
+    <h3>👤 ${esc(data.first_name || '')} ${esc(data.last_name || '')} <code>${data.telegram_id}</code></h3>
+    <button type="button" class="btn sm" id="chat-admin-detail-close">Close</button>
+    <div class="settings-grid">
+      <div class="kv"><b>Username</b>${data.username ? `@${esc(data.username)}` : '—'}</div>
+      <div class="kv"><b>Status</b>${statusPill(data.status || 'active')}</div>
+      <div class="kv"><b>DM /start</b>${data.private_chat_started ? '✅' : '—'}</div>
+      <div class="kv"><b>Connected chats</b>${data.chat_count ?? 0}</div>
+      <div class="kv"><b>Broadcast eligible (total)</b>${data.broadcast_eligible_total ?? 0}</div>
+      <div class="kv"><b>Tracked members (total)</b>${data.tracked_members_total ?? 0}</div>
+    </div>
+    <p style="margin:.75rem 0">
+      ${blocked
+        ? `<button type="button" class="btn sm" data-user-ban="unban" data-user-id="${data.telegram_id}">Unban admin</button>`
+        : `<button type="button" class="btn sm danger" data-user-ban="ban" data-user-id="${data.telegram_id}">Ban admin</button>`}
+    </p>
+    <h4>Chats</h4>
+    <div class="table-wrap"><table><thead><tr>
+      <th>Chat ID</th><th>Title</th><th>Status</th><th>Eligible</th><th>Tracked</th><th>Actions</th>
+    </tr></thead><tbody>${chatRows || '<tr><td colspan="6">No chats</td></tr>'}</tbody></table></div>
+  `;
+  $('#chat-admin-detail-close')?.addEventListener('click', () => {
+    panel.classList.add('hidden');
+    delete panel.dataset.openAdminId;
+  });
+  bindChatActionButtons(panel);
+  bindUserBanButtons(panel);
+}
+
+async function showChatAdminDetail(userId) {
+  const data = await api(`/api/admin/chat-admins/${userId}`);
+  renderChatAdminDetail(data);
+  switchTab('chat-admins');
+}
+
+async function loadChatAdmins() {
+  const data = await api(`/api/admin/chat-admins?${buildQuery('chatAdmins')}`);
+  const rows = data.items.map(a => `<tr class="clickable-row" data-admin-id="${a.telegram_id}">
+    <td>${a.telegram_id}</td>
+    <td>@${a.username || '—'}</td>
+    <td>${esc((a.first_name || '') + ' ' + (a.last_name || ''))}</td>
+    <td>${statusPill(a.status || 'active')}</td>
+    <td>${a.chat_count ?? 0}</td>
+    <td>${a.broadcast_eligible_total ?? 0}</td>
+    <td>${a.tracked_members_total ?? 0}</td>
+    <td><button type="button" class="btn sm" data-admin-view="${a.telegram_id}">View</button></td>
+  </tr>`);
+  renderTable('chat-admins-table',
+    ['ID', 'Username', 'Name', 'Status', 'Chats', 'Eligible', 'Tracked', ''],
+    rows);
+  $all('[data-admin-view]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showChatAdminDetail(btn.dataset.adminView);
+    });
+  });
+  $all('tr[data-admin-id]').forEach(tr => {
+    tr.addEventListener('click', () => showChatAdminDetail(tr.dataset.adminId));
+  });
+  renderPager('chatAdmins', data);
 }
 
 async function loadRequests() {
@@ -411,7 +586,9 @@ function bindFilters() {
         const table = inp.dataset.table;
         state.tables[table].q = inp.value.trim();
         state.tables[table].page = 1;
-        if (state.tab === table || (table === 'requests' && state.tab === 'requests')) loadCurrentTab();
+        const tabMap = { chatAdmins: 'chat-admins' };
+        const tab = tabMap[table] || table;
+        if (state.tab === tab) loadCurrentTab();
       }, 350);
     });
   });

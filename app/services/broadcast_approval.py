@@ -65,7 +65,7 @@ def format_admin_review_request(
         f"<b>From:</b> {owner_name} (<code>{owner_id}</code>)\n"
         f"{chat_line}"
         f"<b>Audience:</b> {label}\n"
-        f"<b>Reachable recipients:</b> {total}\n\n"
+        f"<b>Broadcast eligible:</b> {total}\n\n"
         f"<b>Content preview:</b>\n{preview}\n\n"
         "Approve to start sending in DM, or reject with a remark."
     )
@@ -142,12 +142,21 @@ async def submit_pending_approval(
                 parse_mode="HTML",
                 reply_markup=approval_keyboard,
             )
+            watch = {
+                "admin_id": admin_id,
+                "chat_id": admin_id,
+                "message_id": msg.message_id,
+            }
+            job = await broadcast_repo.get_job(job_id) or {}
+            watches = list(job.get("admin_status_watches") or [])
+            watches.append(watch)
             await broadcast_repo.collection.update_one(
                 {"_id": job_id},
                 {"$set": {
                     f"approval_msg_{admin_id}": msg.message_id,
                     "admin_status_chat_id": admin_id,
                     "admin_status_message_id": msg.message_id,
+                    "admin_status_watches": watches,
                 }},
             )
         except Exception:
@@ -179,7 +188,9 @@ async def approve_broadcast(
     )
     job = await broadcast_repo.get_job(job_id)
     await _clear_admin_approval_keyboard(bot, broadcast_repo, job_id)
-    await refresh_broadcast_status_messages_for_job(bot, broadcast_repo, job_id)
+    await refresh_broadcast_status_messages_for_job(
+        bot, broadcast_repo, job_id, settings=settings,
+    )
     owner_id = job.get("owner_id")
     if owner_id and remark:
         await notify_owner(bot, owner_id, f"✅ <b>Broadcast approved</b>\n\n{remark}")
