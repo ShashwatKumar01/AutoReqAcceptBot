@@ -142,6 +142,7 @@ async def main() -> None:
         chat_repo=chat_repo,
         telegram_service=telegram_service,
         join_request_repo=join_request_repo,
+        user_repo=user_repo,
     )
     approval_service = ApprovalService(
         join_request_repo=join_request_repo,

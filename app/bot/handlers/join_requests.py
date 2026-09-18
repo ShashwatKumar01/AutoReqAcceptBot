@@ -52,6 +52,14 @@ async def handle_join_request(
         "captcha_required": captcha_enabled,
     })
 
+    # Channel Help style unlock DM (allowed while join request is pending)
+    await welcome_service.on_member_requested_join(
+        user_id=user_id,
+        chat_id=chat_id,
+        from_user=from_user,
+        request_doc=request_doc,
+    )
+
     # Welcome on request (before approval)
     await welcome_service.handle_join_request(
         user_id=user_id,

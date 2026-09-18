@@ -1,10 +1,11 @@
+import html
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from app.database.repositories import JoinRequestRepository, ChatRepository
+from app.database.repositories import JoinRequestRepository, ChatRepository, UserRepository
 from app.services.telegram_service import TelegramService
 from app.core.deep_links import welcome_deeplink
 from app.core.logging import get_logger
@@ -17,10 +18,12 @@ class WelcomeService:
         chat_repo: ChatRepository,
         telegram_service: TelegramService,
         join_request_repo: Optional[JoinRequestRepository] = None,
+        user_repo: Optional[UserRepository] = None,
     ):
         self.chat_repo = chat_repo
         self.telegram_service = telegram_service
         self.join_request_repo = join_request_repo
+        self.user_repo = user_repo
         self.logger = get_logger("welcome_service")
 
     # ──────────────────────────────────────────────────────────────
@@ -43,7 +46,29 @@ class WelcomeService:
             return
         if ws.get("welcome_trigger", "on_approval") != "on_request":
             return
-        await self._send(user_id, chat_id, from_user, ws, request_doc)
+        if await self._user_dm_ready(user_id):
+            await self._send(user_id, chat_id, from_user, ws, request_doc)
+
+    async def on_member_requested_join(
+        self,
+        user_id: int,
+        chat_id: int,
+        from_user,
+        request_doc: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Channel Help style: while join request is pending, Telegram allows a DM
+        with the unlock /start link. Send that instead of the full welcome.
+        """
+        ws = await self._load_settings(chat_id)
+        if not ws.get("welcome_enabled", True):
+            return
+        if await self._user_dm_ready(user_id):
+            return
+        status = (request_doc or {}).get("welcome_status")
+        if status in ("invite_sent", "sent"):
+            return
+        await self._send_chelp_invite(user_id, chat_id, from_user, request_doc)
 
     async def handle_approval(
         self,
@@ -66,7 +91,8 @@ class WelcomeService:
         delay = ws.get("welcome_delay_seconds", 0)
 
         if trigger == "on_request":
-            # Already sent at request time
+            if await self._user_dm_ready(user_id):
+                await self._send(user_id, chat_id, from_user, ws, request_doc)
             return
 
         if trigger == "delayed" and delay > 0:
@@ -88,8 +114,7 @@ class WelcomeService:
                 )
             return
 
-        # on_approval → send immediately
-        await self._send(user_id, chat_id, from_user, ws, request_doc)
+        await self._dispatch_welcome(user_id, chat_id, from_user, ws, request_doc)
 
     async def deliver_welcome(
         self,
@@ -130,7 +155,7 @@ class WelcomeService:
                         last_name=req.get("last_name"),
                         username=req.get("username"),
                     )
-                    ok = await self._send(
+                    ok = await self._dispatch_welcome(
                         req["user_id"], req["chat_id"], pseudo_user, ws, req
                     )
                     if ok:
@@ -147,6 +172,93 @@ class WelcomeService:
     # ──────────────────────────────────────────────────────────────
     # Internal helpers
     # ──────────────────────────────────────────────────────────────
+
+    async def _user_dm_ready(self, user_id: int) -> bool:
+        if not self.user_repo:
+            return False
+        doc = await self.user_repo.get_by_telegram_id(int(user_id))
+        return bool(doc and doc.get("private_chat_started"))
+
+    async def _dispatch_welcome(
+        self,
+        user_id: int,
+        chat_id: int,
+        from_user,
+        ws: Dict[str, Any],
+        request_doc: Optional[Dict[str, Any]],
+    ) -> bool:
+        if await self._user_dm_ready(user_id):
+            return await self._send(user_id, chat_id, from_user, ws, request_doc)
+        status = (request_doc or {}).get("welcome_status")
+        if status == "invite_sent":
+            return False
+        return await self._send_chelp_invite(user_id, chat_id, from_user, request_doc)
+
+    async def _send_chelp_invite(
+        self,
+        user_id: int,
+        chat_id: int,
+        from_user,
+        request_doc: Optional[Dict[str, Any]],
+    ) -> bool:
+        """Teaser + URL button to ?start=wel_<chat_id> (full welcome after unlock)."""
+        chat_doc = await self.chat_repo.get(chat_id) or {}
+        title = html.escape(chat_doc.get("title") or "Channel")
+        link = await self._unlock_link_for_chat(chat_id)
+        if not link:
+            self.logger.warning("Welcome invite skipped — no bot username", chat_id=chat_id)
+            return False
+
+        text = f"<b>{title}</b> sent you a private message.\nClick below and see. 👇"
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🔒 Unlock it now", url=link)],
+            ],
+        )
+        bot: Bot | None = getattr(self.telegram_service, "bot", None)
+        ok = False
+        try:
+            if bot:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=text,
+                    parse_mode="HTML",
+                    reply_markup=markup,
+                )
+                ok = True
+            else:
+                ok = await self.telegram_service.send_message(
+                    chat_id=user_id,
+                    text=text,
+                    reply_markup=markup,
+                )
+        except Exception as e:
+            self.logger.warning(
+                "Welcome invite send failed",
+                user_id=user_id,
+                chat_id=chat_id,
+                error=str(e),
+            )
+            ok = False
+
+        if self.join_request_repo and request_doc:
+            try:
+                await self.join_request_repo.update(
+                    {"user_id": user_id, "chat_id": chat_id},
+                    {
+                        "welcome_status": "invite_sent" if ok else "invite_failed",
+                        **({"welcome_invite_at": utcnow()} if ok else {}),
+                    },
+                )
+            except Exception:
+                pass
+
+        self.logger.info(
+            "Welcome invite sent" if ok else "Welcome invite failed",
+            user_id=user_id,
+            chat_id=chat_id,
+        )
+        return ok
 
     async def _load_settings(self, chat_id: int) -> Dict[str, Any]:
         """Load welcome settings from chat_settings collection with defaults."""
