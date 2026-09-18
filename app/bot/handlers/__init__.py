@@ -1,7 +1,7 @@
 from aiogram import Router
 from . import (
     start, tutorial, chats, settings, approval, welcome, buttons,
-    broadcast, stats, join_requests, chat_member, superadmin,
+    broadcast, broadcast_approval, stats, join_requests, chat_member, superadmin,
     goodbye, plan, connect,
 )
 
@@ -24,6 +24,7 @@ def setup_routers() -> Router:
     main_router.include_router(plan.router)
     main_router.include_router(buttons.router)
     main_router.include_router(broadcast.router)
+    main_router.include_router(broadcast_approval.router)
     main_router.include_router(stats.router)
 
     # Superadmin last or as needed

@@ -21,6 +21,11 @@ from ..keyboards.broadcast_menu import (
     broadcast_picker_keyboard,
     broadcast_confirm_keyboard,
     broadcast_control_keyboard,
+    broadcast_moderation_keyboard,
+)
+from app.services.broadcast_approval import (
+    format_owner_submitted,
+    submit_pending_approval,
 )
 
 class BroadcastStates(StatesGroup):
@@ -241,7 +246,12 @@ async def receive_broadcast_message(
 
 
 @router.callback_query(BroadcastStates.confirming, F.data.startswith('broadcast:confirm:'))
-async def confirm_broadcast(callback: CallbackQuery, state: FSMContext, broadcast_repo):
+async def confirm_broadcast(
+    callback: CallbackQuery,
+    state: FSMContext,
+    broadcast_repo,
+    chat_repo,
+):
     data = await state.get_data()
     job_id = data['job_id']
     target = data.get('target')
@@ -249,8 +259,10 @@ async def confirm_broadcast(callback: CallbackQuery, state: FSMContext, broadcas
     payload = data.get('payload')
     estimate = data.get('estimate', 0)
     scope = data.get('chat_scope_owner_id')
+    needs_approval = not data.get('is_super_admin_broadcast', False)
 
-    await broadcast_repo.create_job({
+    initial_status = "pending_approval" if needs_approval else "running"
+    job_doc = {
         '_id': job_id,
         'owner_id': callback.from_user.id,
         'target': target,
@@ -258,35 +270,50 @@ async def confirm_broadcast(callback: CallbackQuery, state: FSMContext, broadcas
         'chat_scope_owner_id': scope,
         'web_created': False,
         'payload': payload,
-        'status': 'running',
+        'status': initial_status,
         'recipients_prepared': False,
         'sent_count': 0,
         'failed_count': 0,
         'total_recipients': estimate,
-    })
+        'requires_approval': needs_approval,
+        'approval_status': 'pending' if needs_approval else None,
+    }
+    await broadcast_repo.create_job(job_doc)
 
     await state.clear()
+    settings = get_settings()
 
-    job = await broadcast_repo.get_job(job_id) or {
-        "_id": job_id,
-        "status": "running",
-        "sent_count": 0,
-        "failed_count": 0,
-        "total_recipients": estimate,
-    }
+    if needs_approval:
+        job = await broadcast_repo.get_job(job_id) or job_doc
+        owner_text = format_owner_submitted(settings, job)
+        await callback.message.edit_text(owner_text, parse_mode="HTML")
+        chat_title = None
+        if target_id:
+            chat = await chat_repo.get(int(target_id))
+            chat_title = chat.get("title") if chat else None
+        owner_name = callback.from_user.full_name or callback.from_user.username or "Owner"
+        await submit_pending_approval(
+            callback.bot,
+            settings,
+            broadcast_repo,
+            job,
+            callback.message.chat.id,
+            callback.message.message_id,
+            owner_name,
+            chat_title,
+            broadcast_moderation_keyboard(job_id),
+        )
+        await callback.answer("Submitted for approval.")
+        return
+
+    job = await broadcast_repo.get_job(job_id) or job_doc
     text = format_broadcast_status_text(job)
     await callback.message.edit_text(text, reply_markup=broadcast_control_keyboard(job_id, "running"))
     await attach_status_message(
         broadcast_repo, job_id, callback.message.chat.id, callback.message.message_id,
     )
-    job_row = await broadcast_repo.get_job(job_id) or {
-        "_id": job_id,
-        "target": target,
-        "target_id": target_id,
-        "total_recipients": estimate,
-    }
     await notify_broadcast_started(
-        callback.bot, get_settings(), job_row, callback.from_user.id,
+        callback.bot, settings, job, callback.from_user.id,
     )
     await callback.answer()
 

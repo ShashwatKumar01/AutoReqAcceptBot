@@ -71,6 +71,8 @@ async def notify_broadcast_started(
     job: dict,
     starter_id: int | None,
 ) -> None:
+    if job.get("status") == "pending_approval":
+        return
     await notify_super_admins(bot, settings, format_broadcast_started(job, starter_id))
 
 
@@ -92,7 +94,14 @@ async def notify_broadcast_finished_if_needed(
         return
     if job.get("status") not in ("completed", "cancelled"):
         return
-    await notify_broadcast_finished(bot, settings, job)
+    text = format_broadcast_finished(job)
+    await notify_super_admins(bot, settings, text)
+    owner_id = job.get("owner_id")
+    if owner_id and job.get("requires_approval"):
+        try:
+            await bot.send_message(owner_id, text, parse_mode="HTML")
+        except Exception:
+            pass
     await broadcast_repo.collection.update_one(
         {"_id": job_id},
         {"$set": {"admin_finish_notified": True}},

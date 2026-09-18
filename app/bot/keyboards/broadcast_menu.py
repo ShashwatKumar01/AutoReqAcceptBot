@@ -48,6 +48,22 @@ def broadcast_confirm_keyboard(job_id: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def broadcast_moderation_keyboard(job_id: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Approve", callback_data=f"broadcast:mod:approve:{job_id}")
+    builder.button(text="❌ Reject", callback_data=f"broadcast:mod:reject:{job_id}")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def broadcast_approve_skip_keyboard(job_id: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="▶️ Approve without note", callback_data=f"broadcast:mod:approve_skip:{job_id}")
+    builder.button(text="❌ Cancel", callback_data=f"broadcast:mod:cancel:{job_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def broadcast_control_keyboard(job_id: str, status: str) -> InlineKeyboardMarkup:
     """Controls for an active broadcast job."""
     builder = InlineKeyboardBuilder()

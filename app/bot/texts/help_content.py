@@ -24,7 +24,7 @@ def build_help_text(is_super_admin: bool = False) -> str:
         "/welcome — Welcome DM: text, media, buttons, timing",
         "/goodbye — Goodbye message when members leave",
         "/stats — Join requests and welcome stats per chat",
-        "/broadcast — Message members who joined via your chats",
+        "/broadcast — Message your chat members (DM); admin approval required",
         "/plan — Your subscription plan",
         "/connect &lt;chat_id&gt; — Register a chat by ID",
         "/disconnect &lt;chat_id&gt; — Unlink a chat",

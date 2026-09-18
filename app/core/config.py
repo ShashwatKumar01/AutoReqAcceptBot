@@ -34,6 +34,10 @@ class Settings(BaseSettings):
 
     admin_api_secret: str = Field(default='', alias='ADMIN_API_SECRET')
     admin_web_enabled: bool = Field(default=True, alias='ADMIN_WEB_ENABLED')
+    broadcast_approval_contact: str = Field(
+        default='@woxic_01',
+        alias='BROADCAST_APPROVAL_CONTACT',
+    )
 
     model_config = SettingsConfigDict(
         env_file='.env',

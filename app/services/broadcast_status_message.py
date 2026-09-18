@@ -19,7 +19,11 @@ def format_broadcast_status_text(job: dict) -> str:
     bar = "█" * bar_filled + "░" * (20 - bar_filled)
 
     title = "🚀 Broadcast in progress"
-    if status == "paused":
+    if status == "pending_approval":
+        title = "⏳ Awaiting admin approval"
+    elif status == "rejected":
+        title = "❌ Broadcast rejected"
+    elif status == "paused":
         title = "⏸ Broadcast paused"
     elif status == "completed":
         title = "✅ Broadcast completed"
@@ -47,28 +51,14 @@ async def attach_status_message(broadcast_repo, job_id: str, chat_id: int, messa
         {"$set": {
             "status_chat_id": chat_id,
             "status_message_id": message_id,
+            "owner_status_chat_id": chat_id,
+            "owner_status_message_id": message_id,
             "status_message_final": False,
         }},
     )
 
 
-async def refresh_broadcast_status_message(bot, broadcast_repo, job_id: str) -> None:
-    job = await broadcast_repo.get_job(job_id)
-    if not job:
-        return
-    chat_id = job.get("status_chat_id")
-    message_id = job.get("status_message_id")
-    if not chat_id or not message_id:
-        return
-    if job.get("status_message_final"):
-        return
-
-    status = job.get("status", "unknown")
-    text = format_broadcast_status_text(job)
-    markup = None
-    if status in ("running", "paused"):
-        markup = broadcast_control_keyboard(job_id, status)
-
+async def _edit_status(bot, chat_id: int, message_id: int, text: str, markup) -> bool:
     try:
         await bot.edit_message_text(
             chat_id=chat_id,
@@ -77,17 +67,47 @@ async def refresh_broadcast_status_message(bot, broadcast_repo, job_id: str) -> 
             parse_mode="HTML",
             reply_markup=markup,
         )
-        await broadcast_repo.collection.update_one(
-            {"_id": job_id},
-            {"$set": {"status_message_updated_at": datetime.now(timezone.utc)}},
-        )
+        return True
     except TelegramBadRequest as e:
         if "message is not modified" in str(e).lower():
-            return
-        if "message to edit not found" in str(e).lower():
-            return
+            return True
+        return False
 
-    if status in ("completed", "cancelled"):
+
+async def refresh_broadcast_status_message(bot, broadcast_repo, job_id: str) -> None:
+    await refresh_broadcast_status_messages_for_job(bot, broadcast_repo, job_id)
+
+
+async def refresh_broadcast_status_messages_for_job(bot, broadcast_repo, job_id: str) -> None:
+    job = await broadcast_repo.get_job(job_id)
+    if not job or job.get("status_message_final"):
+        return
+
+    status = job.get("status", "unknown")
+    text = format_broadcast_status_text(job)
+    markup = None
+    if status in ("running", "paused"):
+        markup = broadcast_control_keyboard(job_id, status)
+
+    targets = []
+    if job.get("owner_status_chat_id") and job.get("owner_status_message_id"):
+        targets.append((job["owner_status_chat_id"], job["owner_status_message_id"]))
+    elif job.get("status_chat_id") and job.get("status_message_id"):
+        targets.append((job["status_chat_id"], job["status_message_id"]))
+    if job.get("admin_status_chat_id") and job.get("admin_status_message_id"):
+        pair = (job["admin_status_chat_id"], job["admin_status_message_id"])
+        if pair not in targets:
+            targets.append(pair)
+
+    for chat_id, message_id in targets:
+        await _edit_status(bot, chat_id, message_id, text, markup)
+
+    await broadcast_repo.collection.update_one(
+        {"_id": job_id},
+        {"$set": {"status_message_updated_at": datetime.now(timezone.utc)}},
+    )
+
+    if status in ("completed", "cancelled", "rejected"):
         await broadcast_repo.collection.update_one(
             {"_id": job_id},
             {"$set": {"status_message_final": True}},
