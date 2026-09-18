@@ -1,6 +1,7 @@
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
 
 from ..keyboards.main_menu import main_menu_keyboard
 from ..keyboards.settings_menu import settings_chat_picker_keyboard
@@ -46,12 +47,14 @@ async def _show_chat_picker(target: Message | CallbackQuery, chat_repo, is_super
 
 
 @router.message(Command('settings'))
-async def settings_command(message: Message, chat_repo, is_super_admin: bool):
+async def settings_command(message: Message, state: FSMContext, chat_repo, is_super_admin: bool):
+    await state.clear()
     await _show_chat_picker(message, chat_repo, is_super_admin)
 
 
 @router.callback_query(F.data == 'menu:settings')
-async def settings_menu(callback: CallbackQuery, chat_repo, is_super_admin: bool):
+async def settings_menu(callback: CallbackQuery, state: FSMContext, chat_repo, is_super_admin: bool):
+    await state.clear()
     await _show_chat_picker(callback, chat_repo, is_super_admin, edit=True)
     await callback.answer()
 

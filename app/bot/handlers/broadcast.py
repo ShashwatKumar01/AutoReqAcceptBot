@@ -49,10 +49,18 @@ async def _start_broadcast_picker(message_or_callback, state: FSMContext, chat_r
 
     await state.set_state(BroadcastStates.picking_target)
     await state.update_data(is_super_admin_broadcast=is_super_admin)
-    text = (
-        "Select who should receive this broadcast.\n"
-        "<i>Messages are sent in private DM only — never posted in groups.</i>"
-    )
+    if is_super_admin:
+        text = (
+            "Select who should receive this broadcast.\n"
+            "<i>Messages are sent in private DM only — never posted in groups.</i>"
+        )
+    else:
+        text = (
+            "📢 <b>Broadcast</b>\n\n"
+            "Choose <b>your group or channel</b>. "
+            "Approved members who have <b>/start</b>ed this bot will get a private DM.\n"
+            "<i>Nothing is posted inside the group.</i>"
+        )
     kb = broadcast_picker_keyboard(chats, is_super_admin=is_super_admin)
     if isinstance(message_or_callback, Message):
         await message_or_callback.answer(text, reply_markup=kb, parse_mode="HTML")
@@ -61,27 +69,28 @@ async def _start_broadcast_picker(message_or_callback, state: FSMContext, chat_r
 
 
 @router.message(Command('broadcast'))
-async def broadcast_command(message: Message, state: FSMContext, chat_repo, is_super_admin: bool = False):
-    if is_super_admin:
-        return await _start_broadcast_picker(message, state, chat_repo, message.from_user.id, True)
+async def broadcast_command(message: Message, state: FSMContext, chat_repo):
+    """Chat admins: broadcast only to members of their own chats. Use /master_broadcast as super admin."""
+    await state.clear()
     await _start_broadcast_picker(message, state, chat_repo, message.from_user.id, False)
 
 
 @router.callback_query(F.data == 'menu:broadcast')
-async def broadcast_menu(callback: CallbackQuery, state: FSMContext, chat_repo, is_super_admin: bool = False):
-    await _start_broadcast_picker(callback, state, chat_repo, callback.from_user.id, is_super_admin)
+async def broadcast_menu(callback: CallbackQuery, state: FSMContext, chat_repo):
+    await state.clear()
+    await _start_broadcast_picker(callback, state, chat_repo, callback.from_user.id, False)
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith('broadcast:chat:'))
-async def broadcast_from_chat_hub(callback: CallbackQuery, state: FSMContext, is_super_admin: bool = False):
+async def broadcast_from_chat_hub(callback: CallbackQuery, state: FSMContext):
     chat_id = int(callback.data.split(':')[2])
     await state.set_state(BroadcastStates.composing_message)
     await state.update_data(
-        is_super_admin_broadcast=is_super_admin,
-        target='chat_members_no_admins' if is_super_admin else 'chat_members',
+        is_super_admin_broadcast=False,
+        target='chat_members',
         target_id=chat_id,
-        chat_scope_owner_id=None if is_super_admin else callback.from_user.id,
+        chat_scope_owner_id=callback.from_user.id,
     )
     await callback.message.edit_text(
         "Send the broadcast message (text, photo, video, document, or GIF).\n"
@@ -184,6 +193,13 @@ async def receive_broadcast_message(
     chat_repo,
     user_repo,
 ):
+    if message.text and message.text.strip().startswith("/"):
+        await state.clear()
+        await message.answer(
+            "Broadcast cancelled. Use /broadcast to start again, or /settings for chat setup."
+        )
+        return
+
     payload = build_broadcast_payload(message)
     if not payload:
         return await message.answer(

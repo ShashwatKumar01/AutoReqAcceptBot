@@ -72,6 +72,7 @@ async def system_stats(message: Message, db, redis_client):
 
 @router.message(Command('master_broadcast'))
 async def master_broadcast_command(message: Message, state: FSMContext, chat_repo):
+    await state.clear()
     await _start_broadcast_picker(message, state, chat_repo, message.from_user.id, True)
 
 

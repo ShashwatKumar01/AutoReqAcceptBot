@@ -26,13 +26,19 @@ def format_broadcast_status_text(job: dict) -> str:
     elif status == "cancelled":
         title = "❌ Broadcast cancelled"
 
-    return (
-        f"{title}\n\n"
-        f"<b>Status:</b> {status}\n"
-        f"<b>Progress:</b> {sent} sent · {failed} failed · {total} total\n"
-        f"<code>{bar}</code> {pct}%\n"
-        f"<b>Job:</b> <code>{job_id[:8]}…</code>"
-    )
+    lines = [
+        f"{title}\n",
+        f"<b>Status:</b> {status}",
+        f"<b>Progress:</b> {sent} sent · {failed} failed · {total} total",
+        f"<code>{bar}</code> {pct}%",
+        f"<b>Job:</b> <code>{job_id[:8]}…</code>",
+    ]
+    if failed and status in ("running", "paused", "cancelled", "completed"):
+        lines.append(
+            "\n<i>Most failures mean the user never /start this bot "
+            "(Telegram blocks DMs) or blocked the bot.</i>"
+        )
+    return "\n".join(lines)
 
 
 async def attach_status_message(broadcast_repo, job_id: str, chat_id: int, message_id: int) -> None:

@@ -38,6 +38,19 @@ async def _admin_user_ids(chat_repo, chat_ids: list[int]) -> set[int]:
     return {int(a["user_id"]) for a in admins if a.get("user_id") is not None}
 
 
+async def _filter_can_dm(user_repo, ids: list[int]) -> list[int]:
+    """Telegram only allows DM to users who have started the bot (stored in users)."""
+    if not ids or not user_repo:
+        return ids
+    cursor = user_repo.collection.find(
+        {"telegram_id": {"$in": ids}},
+        {"telegram_id": 1},
+    )
+    docs = await cursor.to_list(length=None)
+    allowed = {int(d["telegram_id"]) for d in docs if d.get("telegram_id") is not None}
+    return sorted(i for i in ids if i in allowed)
+
+
 async def _member_ids_for_chat(
     join_request_repo,
     user_repo,
@@ -117,25 +130,28 @@ async def collect_recipient_ids(
         return sorted(await _admin_user_ids(chat_repo, chat_ids))
 
     if target == "chat_members_no_admins" and target_id:
-        return await _member_ids_for_chat(
+        raw = await _member_ids_for_chat(
             join_request_repo, user_repo, int(target_id),
             exclude_admins=True, chat_repo=chat_repo,
         )
+        return await _filter_can_dm(user_repo, raw)
 
     if target in ("chat", "chat_members") and target_id:
-        return await _member_ids_for_chat(
+        raw = await _member_ids_for_chat(
             join_request_repo, user_repo, int(target_id),
             exclude_admins=False, chat_repo=chat_repo,
         )
+        return await _filter_can_dm(user_repo, raw)
 
     if target == "specific_id" and target_id is not None:
         tid = int(target_id)
         if tid > 0:
-            return [tid]
-        return await _member_ids_for_chat(
+            return await _filter_can_dm(user_repo, [tid])
+        raw = await _member_ids_for_chat(
             join_request_repo, user_repo, tid,
             exclude_admins=True, chat_repo=chat_repo,
         )
+        return await _filter_can_dm(user_repo, raw)
 
     if target in ("all", "all_chat_members", "all_channels"):
         chat_ids = await _scoped_chat_ids(chat_repo, scope)
@@ -146,6 +162,7 @@ async def collect_recipient_ids(
             {"user_id": 1},
         )
         docs = await cursor.to_list(length=None)
-        return sorted({int(d["user_id"]) for d in docs if d.get("user_id") is not None})
+        raw = sorted({int(d["user_id"]) for d in docs if d.get("user_id") is not None})
+        return await _filter_can_dm(user_repo, raw)
 
     return []

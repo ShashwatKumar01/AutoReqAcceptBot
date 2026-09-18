@@ -1,6 +1,7 @@
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..keyboards.main_menu import main_menu_keyboard, welcome_start_keyboard
 from ..keyboards.help_menu import help_keyboard
@@ -62,11 +63,13 @@ def _start_keyboard(has_chats: bool, bot_username: str, is_super_admin: bool):
 @router.message(CommandStart())
 async def start_handler(
     message: Message,
+    state: FSMContext,
     user_repo,
     chat_repo,
     is_super_admin: bool,
     bot_username: str = "",
 ):
+    await state.clear()
     """
     1. Register/update user (done via AuthMiddleware)
     2. /start is intentionally minimal — only "Add to Group / Add to Channel".
@@ -98,7 +101,8 @@ async def start_handler(
 
 
 @router.callback_query(F.data == "menu:open")
-async def open_menu_callback(callback: CallbackQuery, chat_repo, is_super_admin: bool):
+async def open_menu_callback(callback: CallbackQuery, state: FSMContext, chat_repo, is_super_admin: bool):
+    await state.clear()
     """Open the full main menu from /start."""
     user_id = callback.from_user.id
     chats = await chat_repo.get_by_admin(user_id)
@@ -111,7 +115,8 @@ async def open_menu_callback(callback: CallbackQuery, chat_repo, is_super_admin:
 
 
 @router.message(Command("menu"))
-async def menu_command(message: Message, chat_repo, is_super_admin: bool):
+async def menu_command(message: Message, state: FSMContext, chat_repo, is_super_admin: bool):
+    await state.clear()
     user_id = message.from_user.id
     chats = await chat_repo.get_by_admin(user_id)
     text = (
