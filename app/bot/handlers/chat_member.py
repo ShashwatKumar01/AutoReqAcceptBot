@@ -14,6 +14,7 @@ async def bot_chat_member_updated(
     event: ChatMemberUpdated,
     bot: Bot,
     chat_repo,
+    join_request_repo,
 ):
     """
     Handle bot's own chat member status changes.
@@ -82,8 +83,25 @@ async def bot_chat_member_updated(
 
     elif new_status in ('left', 'kicked', 'restricted'):
         if old_status in ('administrator', 'creator', 'member'):
+            logger.info("my_chat_member: bot removed from chat",
+                        chat_id=chat.id, new_status=new_status)
+            # Mark chat as disconnected
             try:
                 await chat_repo.update_status(chat.id, "disconnected")
             except Exception as e:
                 logger.warning("Failed to mark chat disconnected",
                                chat_id=chat.id, error=str(e))
+            # Delete ALL pending/scheduled join_requests for this chat immediately
+            # — they can never be approved now that the bot is gone
+            try:
+                deleted = await join_request_repo.collection.delete_many({
+                    "chat_id": chat.id,
+                    "status": {"$in": ["pending", "scheduled"]},
+                })
+                if deleted.deleted_count:
+                    logger.info("Deleted pending requests after bot removal",
+                                chat_id=chat.id, count=deleted.deleted_count)
+            except Exception as e:
+                logger.warning("Failed to delete requests after bot removal",
+                               chat_id=chat.id, error=str(e))
+

@@ -21,6 +21,7 @@ from app.services.welcome_service import WelcomeService
 from app.services.subscription_service import SubscriptionService
 from app.services.entitlement_service import EntitlementService
 from app.services.approval_service import ApprovalService
+from app.services.cleanup_service import CleanupService
 from app.workers.approval_worker import ApprovalWorker
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
@@ -66,9 +67,19 @@ async def main():
         redis_client=redis_client,
     )
 
+    _cleanup_admin_id = settings.super_admin_id_list[0] if getattr(settings, 'super_admin_id_list', []) else None
+    cleanup_service = CleanupService(
+        db=db,
+        bot=bot,
+        super_admin_chat_id=_cleanup_admin_id,
+        approved_retention_hours=24,
+        failed_retention_hours=72,
+    )
+
     worker = ApprovalWorker(
         approval_service=approval_service,
         welcome_service=welcome_service,
+        cleanup_service=cleanup_service,
         poll_interval=settings.approval_poll_interval,
     )
 

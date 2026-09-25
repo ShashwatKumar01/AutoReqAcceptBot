@@ -42,6 +42,7 @@ from app.services.broadcast_service import BroadcastService
 from app.workers.approval_worker import ApprovalWorker
 from app.workers.broadcast_worker import BroadcastWorker
 from app.web.routes import setup_admin_web
+from app.services.cleanup_service import CleanupService
 
 
 async def health_check(request: web.Request) -> web.Response:
@@ -168,9 +169,18 @@ async def main() -> None:
         rate_limiter=rate_limiter,
     )
 
+    _cleanup_admin_id = settings.super_admin_id_list[0] if getattr(settings, 'super_admin_id_list', []) else None
+    _cleanup_svc = CleanupService(
+        db=db,
+        bot=bot,
+        super_admin_chat_id=_cleanup_admin_id,
+        approved_retention_hours=24,
+        failed_retention_hours=72,
+    )
     approval_worker = ApprovalWorker(
         approval_service=approval_service,
         welcome_service=welcome_service,
+        cleanup_service=_cleanup_svc,
         poll_interval=5,
     )
     broadcast_worker = BroadcastWorker(

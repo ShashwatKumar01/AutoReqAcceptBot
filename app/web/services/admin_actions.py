@@ -70,10 +70,20 @@ class AdminActionsService:
         if self.bot:
             try:
                 await self.bot.leave_chat(cid)
-            except (TelegramBadRequest, TelegramForbiddenError) as e:
-                raise ValueError(str(e)) from e
-        await self.chat_repo.update_status(
-            cid,
-            "disconnected",
-            {"is_active": False},
-        )
+            except (TelegramBadRequest, TelegramForbiddenError):
+                # Bot may already have left — still clean up DB
+                pass
+        # Hard-delete chat and all related data
+        db = self.chat_repo.collection.database
+        await self.chat_repo.collection.delete_one({"chat_id": cid})
+        for col_name in ("chat_settings", "chat_admins", "join_requests"):
+            try:
+                col = db[col_name]
+                if col_name == "chat_admins":
+                    await col.delete_many({"chat_id": cid})
+                elif col_name == "join_requests":
+                    await col.delete_many({"chat_id": cid})
+                else:
+                    await col.delete_one({"chat_id": cid})
+            except Exception:
+                pass

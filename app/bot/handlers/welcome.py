@@ -456,7 +456,7 @@ async def set_trigger(callback: CallbackQuery, state: FSMContext, chat_repo):
         await state.update_data(chat_id=chat_id)
         await callback.message.answer(
             "✏️ Enter the delay in <b>minutes</b> (e.g. <code>15</code> for 15 min):\n"
-            "Max 7 days (10080 min). Send /cancel to abort."
+            "Max 3 days (4320 min). Send /cancel to abort."
         )
         return await callback.answer()
 
@@ -505,8 +505,8 @@ async def receive_custom_delay(message: Message, state: FSMContext, chat_repo):
         return await message.answer("Please enter a valid number of minutes. Or /cancel.")
 
     minutes = int(message.text.strip())
-    if minutes < 1 or minutes > 10080:
-        return await message.answer("Must be between 1 and 10080 minutes (7 days). Or /cancel.")
+    if minutes < 1 or minutes > 4320:
+        return await message.answer("Must be between 1 and 4320 minutes (3 days). Or /cancel.")
 
     data = await state.get_data()
     chat_id = data["chat_id"]

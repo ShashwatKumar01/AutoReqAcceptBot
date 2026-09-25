@@ -95,28 +95,18 @@ class ApprovalService:
                     {"status": "approved", "processed_at": utcnow()}
                 )
 
-                if self.user_repo:
-                    try:
-                        await self.user_repo.upsert({
-                            "telegram_id": request_doc["user_id"],
-                            "username": request_doc.get("username"),
-                            "first_name": request_doc.get("first_name"),
-                            "last_name": request_doc.get("last_name"),
-                            "is_bot": False,
-                            "is_active": True,
-                            "chat_id": request_doc["chat_id"],
-                        })
-                        await self.chat_repo.increment_counter(
-                            request_doc["chat_id"], "total_join_requests"
-                        )
-                        await self.chat_repo.increment_counter(
-                            request_doc["chat_id"], "total_approved"
-                        )
-                    except Exception as e:
-                        self.logger.warning(
-                            "User upsert failed after delayed approval",
-                            error=str(e),
-                        )
+                try:
+                    await self.chat_repo.increment_counter(
+                        request_doc["chat_id"], "total_join_requests"
+                    )
+                    await self.chat_repo.increment_counter(
+                        request_doc["chat_id"], "total_approved"
+                    )
+                except Exception as e:
+                    self.logger.warning(
+                        "Counter update failed after delayed approval",
+                        error=str(e),
+                    )
                 
                 if self.welcome_service and settings.get("welcome_enabled", True):
                     await self.welcome_service.handle_approval(
@@ -130,6 +120,15 @@ class ApprovalService:
                         ),
                         request_doc=current_doc,
                     )
+                else:
+                    # Welcome disabled — mark skipped immediately so nightly cleanup picks up this doc
+                    try:
+                        await self.join_request_repo.update(
+                            {"_id": request_id},
+                            {"welcome_status": "skipped"},
+                        )
+                    except Exception:
+                        pass
                     
                 return True
             else:

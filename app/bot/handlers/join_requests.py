@@ -147,8 +147,34 @@ async def _approve_and_track(
         logger.info("Telegram approved join request",
                     chat_id=chat_id, user_id=user_id)
     except Exception as e:
+        err_str = str(e)
+        # USER_ALREADY_PARTICIPANT: user joined directly — not an error, skip silently
+        if 'USER_ALREADY_PARTICIPANT' in err_str.upper():
+            logger.info(
+                "User already participant — skipping (joined directly)",
+                chat_id=chat_id, user_id=user_id,
+            )
+            await join_request_repo.update(
+                {"user_id": user_id, "chat_id": chat_id},
+                {"status": "approved"},
+            )
+            try:
+                await chat_repo.increment_counter(chat_id, "total_join_requests")
+                await chat_repo.increment_counter(chat_id, "total_approved")
+            except Exception:
+                pass
+            try:
+                await welcome_svc.handle_approval(
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    from_user=from_user,
+                    request_doc=request_doc,
+                )
+            except Exception as we:
+                logger.error("Welcome dispatch error", user_id=user_id, chat_id=chat_id, error=str(we))
+            return
         logger.error("approve_chat_join_request failed",
-                     chat_id=chat_id, user_id=user_id, error=str(e),
+                     chat_id=chat_id, user_id=user_id, error=err_str,
                      exc_info=True)
         try:
             chat_obj = await chat_repo.collection.find_one({"chat_id": chat_id})
@@ -160,7 +186,7 @@ async def _approve_and_track(
                         f"⚠️ <b>Auto-approval failed</b> for "
                         f"<b>{(from_user.first_name or 'user')}</b> in "
                         f"<b>{(chat_obj or {}).get('title', 'a chat')}</b>.\n\n"
-                        f"<code>{type(e).__name__}: {str(e)[:200]}</code>\n\n"
+                        f"<code>{type(e).__name__}: {err_str[:200]}</code>\n\n"
                         "Make sure the bot has the <b>Add Members</b> / "
                         "<b>Add Subscribers</b> permission."
                     ),
@@ -175,29 +201,27 @@ async def _approve_and_track(
     )
 
     try:
-        await user_repo.upsert({
-            "telegram_id": from_user.id,
-            "username": from_user.username,
-            "first_name": from_user.first_name,
-            "last_name": from_user.last_name,
-            "language_code": getattr(from_user, "language_code", None),
-            "is_bot": False,
-            "is_active": True,
-            "chat_id": chat_id,
-        })
         await chat_repo.increment_counter(chat_id, "total_join_requests")
         await chat_repo.increment_counter(chat_id, "total_approved")
     except Exception as e:
-        logger.error("User upsert/counter failed", chat_id=chat_id,
+        logger.error("Counter update failed", chat_id=chat_id,
                      user_id=user_id, error=str(e))
 
     try:
-        await welcome_svc.handle_approval(
-            user_id=user_id,
-            chat_id=chat_id,
-            from_user=from_user,
-            request_doc=request_doc,
-        )
+        settings = await chat_repo.get_chat_settings_with_defaults(chat_id)
+        if settings.get("welcome_enabled", True):
+            await welcome_svc.handle_approval(
+                user_id=user_id,
+                chat_id=chat_id,
+                from_user=from_user,
+                request_doc=request_doc,
+            )
+        else:
+            # Welcome disabled — mark skipped immediately so cleanup can remove this doc tonight
+            await join_request_repo.update(
+                {"user_id": user_id, "chat_id": chat_id},
+                {"welcome_status": "skipped"},
+            )
     except Exception as e:
         logger.error("Welcome dispatch error", user_id=user_id, chat_id=chat_id, error=str(e))
 

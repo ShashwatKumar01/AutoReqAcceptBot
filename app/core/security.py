@@ -61,7 +61,7 @@ def parse_and_validate_duration(text: str) -> int | None:
         # Try pure number as minutes
         if text.isdigit():
             val = int(text) * 60
-            return val if 0 <= val <= 604800 else None
+            return val if 0 <= val <= 259200 else None  # 3 days max
         return None
         
     parts = match.groupdict()
@@ -74,7 +74,7 @@ def parse_and_validate_duration(text: str) -> int | None:
     
     total_seconds = (hours * 3600) + (minutes * 60) + seconds
     
-    if 0 <= total_seconds <= 604800:
+    if 0 <= total_seconds <= 259200:  # 3 days max
         return total_seconds
     return None
 

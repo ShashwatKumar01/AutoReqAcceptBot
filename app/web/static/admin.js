@@ -18,6 +18,81 @@ function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
 function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
 function clearToken() { localStorage.removeItem(TOKEN_KEY); }
 
+function openDrawer(title, bodyHtml) {
+  document.getElementById('drawer-title').textContent = title;
+  document.getElementById('drawer-body').innerHTML = bodyHtml;
+  document.getElementById('chat-drawer').classList.add('open');
+  document.getElementById('drawer-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeDrawer() {
+  document.getElementById('chat-drawer').classList.remove('open');
+  document.getElementById('drawer-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+async function viewChatInDrawer(chatId) {
+  openDrawer('Loading…', '<div style="text-align:center;padding:2rem;color:var(--muted)">⏳ Loading chat details…</div>');
+  try {
+    const resp = await fetch(`/api/admin/chats/${chatId}`, { headers: { Authorization: `Bearer ${token()}` } });
+    if (!resp.ok) throw new Error('Failed to load chat');
+    const d = await resp.json();
+    const s = d.settings || {};
+    const statusBadge = `<span class="drawer-badge badge-${(d.status||'unknown').toLowerCase()}">${d.status||'unknown'}</span>`;
+    const typeBadge = `<span class="drawer-badge badge-${(d.type||'').toLowerCase()}">${d.type||'—'}</span>`;
+    const bool = v => v ? '✅' : '❌';
+    const body = `
+      <div class="drawer-section">
+        <h4>Basic Info</h4>
+        <div class="drawer-kv-grid">
+          <div class="drawer-kv" style="grid-column:span 2"><b>Title</b><span style="font-weight:700;font-size:1rem">${d.title||'—'}</span></div>
+          <div class="drawer-kv"><b>Chat ID</b><span><code style="font-size:.8rem">${d.chat_id||'—'}</code></span></div>
+          <div class="drawer-kv"><b>Type</b><span>${typeBadge}</span></div>
+          <div class="drawer-kv"><b>Status</b><span>${statusBadge}</span></div>
+          <div class="drawer-kv"><b>Username</b><span>${d.username ? '@'+d.username : '—'}</span></div>
+        </div>
+      </div>
+      <div class="drawer-section">
+        <h4>Stats</h4>
+        <div class="drawer-stats-row">
+          <div class="drawer-stat"><span class="stat-label">📨 Requests</span><span class="stat-value" style="color:var(--info)">${d.total_join_requests||0}</span></div>
+          <div class="drawer-stat"><span class="stat-label">✅ Approved</span><span class="stat-value" style="color:var(--success)">${d.total_approved||0}</span></div>
+          <div class="drawer-stat"><span class="stat-label">👋 Welcome</span><span class="stat-value" style="color:var(--accent)">${d.total_welcome_sent||0}</span></div>
+        </div>
+      </div>
+      <div class="drawer-section">
+        <h4>Approval Settings</h4>
+        <div class="drawer-kv-grid">
+          <div class="drawer-kv"><b>Auto Approve</b><span>${bool(s.auto_approval_enabled !== false)}</span></div>
+          <div class="drawer-kv"><b>Delay</b><span>${s.approval_delay_seconds ? Math.round(s.approval_delay_seconds/60)+' min' : 'Immediate'}</span></div>
+        </div>
+      </div>
+      <div class="drawer-section">
+        <h4>Welcome Settings</h4>
+        <div class="drawer-kv-grid">
+          <div class="drawer-kv"><b>Enabled</b><span>${bool(s.welcome_enabled !== false)}</span></div>
+          <div class="drawer-kv"><b>Trigger</b><span>${s.welcome_trigger||'on_approval'}</span></div>
+          <div class="drawer-kv"><b>Delay</b><span>${s.welcome_delay_seconds ? Math.round(s.welcome_delay_seconds/60)+' min' : '—'}</span></div>
+          <div class="drawer-kv"><b>Buttons</b><span>${(s.welcome_buttons||[]).length} btn(s)</span></div>
+        </div>
+      </div>
+      <div class="drawer-section">
+        <h4>Bot Info</h4>
+        <div class="drawer-kv-grid">
+          <div class="drawer-kv"><b>Can Approve JR</b><span>${bool(d.has_join_request_permission)}</span></div>
+          <div class="drawer-kv"><b>Connected By</b><span>${d.connected_by||'—'}</span></div>
+          <div class="drawer-kv" style="grid-column:span 2"><b>Connected At</b><span>${d.connected_at ? new Date(d.connected_at).toLocaleString() : '—'}</span></div>
+        </div>
+      </div>
+    `;
+    document.getElementById('drawer-title').textContent = d.title || 'Chat Details';
+    document.getElementById('drawer-body').innerHTML = body;
+  } catch(e) {
+    document.getElementById('drawer-body').innerHTML = `<p style="color:var(--danger)">❌ ${e.message}</p>`;
+  }
+}
+
 async function api(path, opts = {}) {
   const headers = { ...(opts.headers || {}), Authorization: `Bearer ${token()}` };
   if (opts.body) headers['Content-Type'] = 'application/json';
@@ -422,11 +497,11 @@ async function loadChats() {
   $all('[data-chat-view]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      showChatDetail(btn.dataset.chatView);
+      viewChatInDrawer(btn.dataset.chatView);
     });
   });
   $all('tr[data-chat-id]').forEach(tr => {
-    tr.addEventListener('click', () => showChatDetail(tr.dataset.chatId));
+    tr.addEventListener('click', () => viewChatInDrawer(tr.dataset.chatId));
   });
   renderPager('chats', data);
 }
@@ -654,6 +729,10 @@ async function init() {
   });
 
   $('#refresh-btn').addEventListener('click', () => loadCurrentTab());
+
+  document.getElementById('drawer-close-btn').addEventListener('click', closeDrawer);
+  document.getElementById('drawer-overlay').addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
 
   function syncBroadcastTargetFields() {
     const target = $('#broadcast-target')?.value;

@@ -170,6 +170,8 @@ async def receive_custom_delay(message: Message, state: FSMContext, chat_repo):
         return await message.answer("Please enter a valid number of minutes.")
         
     minutes = int(message.text)
+    if minutes < 1 or minutes > 4320:
+        return await message.answer("Please enter a delay between 1 and 4320 minutes (max 3 days).")
     delay_seconds = minutes * 60
     
     data = await state.get_data()
