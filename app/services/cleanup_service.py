@@ -111,10 +111,24 @@ class CleanupService:
             stats["errors"].append(f"stale: {e}")
             self.logger.error("Stale cleanup failed", error=str(e))
 
+        # 5. Delete users who never started the bot in DM (except superadmins)
+        if purge_non_dm_users:
+            try:
+                admin_ids = super_admin_ids or []
+                r = await self.db["users"].delete_many({
+                    "private_chat_started": {"$ne": True},
+                    "telegram_id": {"$nin": admin_ids},
+                })
+                stats["users_purged"] = r.deleted_count
+                self.logger.info("Purged non-DM users", count=r.deleted_count)
+            except Exception as e:
+                stats["errors"].append(f"users purge: {e}")
+
         total = (
             stats["approved_deleted"]
             + stats["failed_deleted"]
             + stats["stale_deleted"]
+            + stats.get("users_purged", 0)
         )
         self.logger.info("Daily cleanup complete", total_deleted=total, stats=stats)
 
@@ -129,13 +143,18 @@ class CleanupService:
                     f"⏳ Stale pending/scheduled: <b>{stats['stale_deleted']}</b>\n"
                     if stats["stale_deleted"] else ""
                 )
+                users_line = (
+                    f"👥 Non-DM users purged: <b>{stats['users_purged']}</b>\n"
+                    if stats.get("users_purged") else ""
+                )
                 await self.bot.send_message(
                     chat_id=self.super_admin_chat_id,
                     text=(
-                        f"🗑 <b>Daily DB Cleanup</b>\n\n"
+                        f"🗑 <b>DB Cleanup Report</b>\n\n"
                         f"✅ Approved (done): <b>{stats['approved_deleted']}</b>\n"
                         f"❌ Failed (old): <b>{stats['failed_deleted']}</b>\n"
                         f"{stale_line}"
+                        f"{users_line}"
                         f"📦 Total removed: <b>{total}</b>"
                         f"{err_note}\n"
                         f"⏰ {now.strftime('%Y-%m-%d %H:%M UTC')}"

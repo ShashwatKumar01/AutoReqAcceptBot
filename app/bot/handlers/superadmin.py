@@ -182,3 +182,41 @@ async def db_check(message: Message, join_request_repo, chat_repo, user_repo, br
         )
     except Exception as e:
         await message.answer(f"❌ DB check failed: {e}")
+
+
+@router.message(Command('cleandb'))
+async def clean_db_command(message: Message, join_request_repo, user_repo):
+    """
+    Superadmin command to manually trigger DB purge:
+    - Deletes approved join_requests > 24h
+    - Deletes failed join_requests > 72h
+    - Deletes stale pending/scheduled > 3d
+    - Deletes users who never started the bot in DM
+    """
+    settings = get_settings()
+    wait_msg = await message.answer("🧹 <i>Cleaning up unused DB records...</i>")
+    try:
+        from app.services.cleanup_service import CleanupService
+        db = join_request_repo.collection.database
+        svc = CleanupService(
+            db=db,
+            bot=message.bot,
+            super_admin_chat_id=message.from_user.id,
+            approved_retention_hours=24,
+            failed_retention_hours=72,
+        )
+        stats = await svc.run_daily_cleanup(
+            purge_non_dm_users=True,
+            super_admin_ids=settings.super_admin_id_list,
+        )
+        total = stats["approved_deleted"] + stats["failed_deleted"] + stats["stale_deleted"] + stats.get("users_purged", 0)
+        await wait_msg.edit_text(
+            f"✅ <b>Database Cleanup Finished!</b>\n\n"
+            f"  • Approved requests deleted: <b>{stats['approved_deleted']}</b>\n"
+            f"  • Failed requests deleted: <b>{stats['failed_deleted']}</b>\n"
+            f"  • Stale requests deleted: <b>{stats['stale_deleted']}</b>\n"
+            f"  • Non-DM users deleted: <b>{stats.get('users_purged', 0)}</b>\n\n"
+            f"📦 <b>Total removed: {total}</b>"
+        )
+    except Exception as e:
+        await wait_msg.edit_text(f"❌ Cleanup failed: {e}")
