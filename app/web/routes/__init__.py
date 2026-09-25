@@ -32,6 +32,7 @@ def setup_admin_web(app: web.Application, *, settings, user_repo, chat_repo,
         broadcast_repo=broadcast_repo,
         db=db,
         redis_client=redis_client,
+        bot=bot,
     )
     app['admin_actions'] = AdminActionsService(user_repo, chat_repo, bot=bot)
 

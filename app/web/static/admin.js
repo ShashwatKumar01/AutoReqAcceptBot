@@ -38,55 +38,74 @@ async function viewChatInDrawer(chatId) {
     const resp = await fetch(`/api/admin/chats/${chatId}`, { headers: { Authorization: `Bearer ${token()}` } });
     if (!resp.ok) throw new Error('Failed to load chat');
     const d = await resp.json();
-    const s = d.settings || {};
-    const statusBadge = `<span class="drawer-badge badge-${(d.status||'unknown').toLowerCase()}">${d.status||'unknown'}</span>`;
-    const typeBadge = `<span class="drawer-badge badge-${(d.type||'').toLowerCase()}">${d.type||'—'}</span>`;
+    const c = d.chat || d;
+    const s = d.settings || d.welcome || {};
+    const approval = d.approval || {};
+    const statusBadge = `<span class="drawer-badge badge-${(c.status||'unknown').toLowerCase()}">${c.status||'unknown'}</span>`;
+    const typeBadge = `<span class="drawer-badge badge-${(c.type||'').toLowerCase()}">${c.type||'—'}</span>`;
     const bool = v => v ? '✅' : '❌';
+    const memberCount = d.member_count != null ? d.member_count.toLocaleString() : (c.member_count ? c.member_count.toLocaleString() : '—');
+    const canApprove = d.bot_can_approve !== undefined ? d.bot_can_approve : c.has_join_request_permission;
+    const autoApprove = approval.enabled !== undefined ? approval.enabled : (s.auto_approval_enabled !== false);
+    const approvalDelay = approval.delay !== undefined ? approval.delay : (s.approval_delay_seconds || 0);
+    const adminCount = (d.admin_user_ids || []).length;
+    const desc = d.description || c.description || '';
+    const inviteLink = d.invite_link || c.invite_link || '';
+
     const body = `
       <div class="drawer-section">
         <h4>Basic Info</h4>
         <div class="drawer-kv-grid">
-          <div class="drawer-kv" style="grid-column:span 2"><b>Title</b><span style="font-weight:700;font-size:1rem">${d.title||'—'}</span></div>
-          <div class="drawer-kv"><b>Chat ID</b><span><code style="font-size:.8rem">${d.chat_id||'—'}</code></span></div>
+          <div class="drawer-kv" style="grid-column:span 2"><b>Title</b><span style="font-weight:700;font-size:1.05rem">${c.title||'—'}</span></div>
+          <div class="drawer-kv"><b>Chat ID</b><span><code style="font-size:.8rem">${c.chat_id||'—'}</code></span></div>
           <div class="drawer-kv"><b>Type</b><span>${typeBadge}</span></div>
           <div class="drawer-kv"><b>Status</b><span>${statusBadge}</span></div>
-          <div class="drawer-kv"><b>Username</b><span>${d.username ? '@'+d.username : '—'}</span></div>
+          <div class="drawer-kv"><b>Username</b><span>${c.username ? '@'+c.username : '—'}</span></div>
+          ${inviteLink ? `<div class="drawer-kv" style="grid-column:span 2"><b>Invite Link</b><span><a href="${inviteLink}" target="_blank" style="color:var(--accent);text-decoration:none;word-break:break-all">${inviteLink} ↗</a></span></div>` : ''}
         </div>
       </div>
+      ${desc ? `<div class="drawer-section"><h4>About / Description</h4><div class="drawer-kv" style="white-space:pre-wrap;font-size:0.85rem">${desc}</div></div>` : ''}
       <div class="drawer-section">
-        <h4>Stats</h4>
+        <h4>Community & Activity</h4>
         <div class="drawer-stats-row">
-          <div class="drawer-stat"><span class="stat-label">📨 Requests</span><span class="stat-value" style="color:var(--info)">${d.total_join_requests||0}</span></div>
-          <div class="drawer-stat"><span class="stat-label">✅ Approved</span><span class="stat-value" style="color:var(--success)">${d.total_approved||0}</span></div>
-          <div class="drawer-stat"><span class="stat-label">👋 Welcome</span><span class="stat-value" style="color:var(--accent)">${d.total_welcome_sent||0}</span></div>
+          <div class="drawer-stat"><span class="stat-label">👥 Members/Subs</span><span class="stat-value" style="color:#38bdf8">${memberCount}</span></div>
+          <div class="drawer-stat"><span class="stat-label">📨 Total Requests</span><span class="stat-value" style="color:var(--info)">${c.total_join_requests||0}</span></div>
+          <div class="drawer-stat"><span class="stat-label">✅ Approved</span><span class="stat-value" style="color:var(--success)">${c.total_approved||0}</span></div>
+        </div>
+        <div class="drawer-stats-row" style="margin-top:0.4rem">
+          <div class="drawer-stat"><span class="stat-label">👋 Welcome Sent</span><span class="stat-value" style="color:var(--accent)">${c.total_welcome_sent||0}</span></div>
+          <div class="drawer-stat"><span class="stat-label">📢 DM Eligible</span><span class="stat-value" style="color:#ec4899">${(d.audience||{}).broadcast_eligible||0}</span></div>
+          <div class="drawer-stat"><span class="stat-label">👑 Admins Count</span><span class="stat-value" style="color:var(--warn)">${adminCount}</span></div>
         </div>
       </div>
       <div class="drawer-section">
-        <h4>Approval Settings</h4>
+        <h4>Approval Configuration</h4>
         <div class="drawer-kv-grid">
-          <div class="drawer-kv"><b>Auto Approve</b><span>${bool(s.auto_approval_enabled !== false)}</span></div>
-          <div class="drawer-kv"><b>Delay</b><span>${s.approval_delay_seconds ? Math.round(s.approval_delay_seconds/60)+' min' : 'Immediate'}</span></div>
+          <div class="drawer-kv"><b>Auto Approve</b><span>${bool(autoApprove)}</span></div>
+          <div class="drawer-kv"><b>Delay</b><span>${approvalDelay ? Math.round(approvalDelay/60)+' min' : 'Immediate'}</span></div>
+          <div class="drawer-kv"><b>Captcha Mode</b><span>${bool(approval.captcha_enabled)}</span></div>
+          <div class="drawer-kv"><b>Can Bot Approve</b><span>${bool(canApprove)}</span></div>
         </div>
       </div>
       <div class="drawer-section">
-        <h4>Welcome Settings</h4>
+        <h4>Welcome Configuration</h4>
         <div class="drawer-kv-grid">
           <div class="drawer-kv"><b>Enabled</b><span>${bool(s.welcome_enabled !== false)}</span></div>
           <div class="drawer-kv"><b>Trigger</b><span>${s.welcome_trigger||'on_approval'}</span></div>
-          <div class="drawer-kv"><b>Delay</b><span>${s.welcome_delay_seconds ? Math.round(s.welcome_delay_seconds/60)+' min' : '—'}</span></div>
-          <div class="drawer-kv"><b>Buttons</b><span>${(s.welcome_buttons||[]).length} btn(s)</span></div>
+          <div class="drawer-kv"><b>Delay</b><span>${s.welcome_delay_seconds ? Math.round(s.welcome_delay_seconds/60)+' min' : 'Immediate'}</span></div>
+          <div class="drawer-kv"><b>Frequency</b><span>${s.welcome_frequency||'every_join'}</span></div>
+          <div class="drawer-kv" style="grid-column:span 2"><b>Buttons Configured</b><span>${(s.welcome_buttons||[]).length} button(s)</span></div>
         </div>
       </div>
       <div class="drawer-section">
-        <h4>Bot Info</h4>
+        <h4>Connection Details</h4>
         <div class="drawer-kv-grid">
-          <div class="drawer-kv"><b>Can Approve JR</b><span>${bool(d.has_join_request_permission)}</span></div>
-          <div class="drawer-kv"><b>Connected By</b><span>${d.connected_by||'—'}</span></div>
-          <div class="drawer-kv" style="grid-column:span 2"><b>Connected At</b><span>${d.connected_at ? new Date(d.connected_at).toLocaleString() : '—'}</span></div>
+          <div class="drawer-kv"><b>Connected By (Admin ID)</b><span>${c.connected_by || c.admin_id || '—'}</span></div>
+          <div class="drawer-kv"><b>Connected At</b><span>${c.connected_at ? new Date(c.connected_at).toLocaleString() : '—'}</span></div>
         </div>
       </div>
     `;
-    document.getElementById('drawer-title').textContent = d.title || 'Chat Details';
+    document.getElementById('drawer-title').textContent = c.title || 'Chat Details';
     document.getElementById('drawer-body').innerHTML = body;
   } catch(e) {
     document.getElementById('drawer-body').innerHTML = `<p style="color:var(--danger)">❌ ${e.message}</p>`;

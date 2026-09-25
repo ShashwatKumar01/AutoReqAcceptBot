@@ -10,13 +10,14 @@ from app.web.utils import serialize_doc, broadcast_progress, mask_bot_token
 
 
 class AdminQueryService:
-    def __init__(self, user_repo, chat_repo, join_request_repo, broadcast_repo, db, redis_client=None):
+    def __init__(self, user_repo, chat_repo, join_request_repo, broadcast_repo, db, redis_client=None, bot=None):
         self.user_repo = user_repo
         self.chat_repo = chat_repo
         self.join_request_repo = join_request_repo
         self.broadcast_repo = broadcast_repo
         self.db = db
         self.redis_client = redis_client
+        self.bot = bot
 
     async def _system_health(self) -> dict[str, Any]:
         return await check_system_health(self.db, self.redis_client)
@@ -185,9 +186,33 @@ class AdminQueryService:
         broadcast_eligible = await self.user_repo.count_broadcast_eligible(chat_ids=[chat_id])
         tracked_members = await self.user_repo.count_tracked_in_chats([chat_id])
 
+        # Fetch live stats from Telegram Bot API if bot is available
+        member_count = None
+        telegram_chat = None
+        bot_can_approve = None
+        if self.bot:
+            try:
+                member_count = await self.bot.get_chat_member_count(chat_id)
+            except Exception:
+                pass
+            try:
+                telegram_chat = await self.bot.get_chat(chat_id)
+            except Exception:
+                pass
+            try:
+                me = await self.bot.get_me()
+                cm = await self.bot.get_chat_member(chat_id, me.id)
+                bot_can_approve = getattr(cm, 'can_invite_users', False)
+            except Exception:
+                pass
+
         return {
             "chat": serialize_doc(chat),
             "admin_user_ids": admin_ids,
+            "member_count": member_count,
+            "description": getattr(telegram_chat, 'description', getattr(telegram_chat, 'bio', None)) if telegram_chat else None,
+            "invite_link": getattr(telegram_chat, 'invite_link', None) if telegram_chat else None,
+            "bot_can_approve": bot_can_approve if bot_can_approve is not None else chat.get("has_join_request_permission", False),
             "audience": {
                 "broadcast_eligible": broadcast_eligible,
                 "tracked_members": tracked_members,
