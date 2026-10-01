@@ -169,11 +169,10 @@ async def main() -> None:
         rate_limiter=rate_limiter,
     )
 
-    _cleanup_admin_id = settings.super_admin_id_list[0] if getattr(settings, 'super_admin_id_list', []) else None
     _cleanup_svc = CleanupService(
         db=db,
         bot=bot,
-        super_admin_chat_id=_cleanup_admin_id,
+        super_admin_chat_ids=settings.super_admin_id_list,
         approved_retention_hours=24,
         failed_retention_hours=72,
     )

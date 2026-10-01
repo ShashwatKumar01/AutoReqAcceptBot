@@ -39,28 +39,34 @@ def main_menu_keyboard(is_super_admin: bool = False) -> InlineKeyboardMarkup:
 
     return builder.as_markup()
 
+ADMIN_PERMS = (
+    "post_messages+edit_messages+promote_members+delete_messages+"
+    "restrict_members+invite_users+pin_messages+manage_video_chats+change_info"
+)
+
+
 def welcome_start_keyboard(bot_username: str = "") -> InlineKeyboardMarkup:
     """
     Keyboard shown on /start before any chats connected.
 
     The two URL buttons use Telegram's deep-link parameters:
-      ?startgroup=true  → bot is added as admin of a group
-      ?startchannel=true → bot is added as admin of a channel
+      ?startgroup&admin=...  → bot is added as admin of a group with rights
+      ?startchannel&admin=... → bot is added as admin of a channel with rights
     If we don't know the bot username yet (e.g. getMe failed at startup),
     those rows are dropped so the keyboard still renders.
     """
     builder = InlineKeyboardBuilder()
 
-    # Row 1: Add to Group / Add to Channel (deep-link buttons).
+    # Row 1: Add to Group / Add to Channel (deep-link buttons with pre-enabled rights).
     # These are the primary conversion path — keep them visible.
     if bot_username:
         builder.button(
             text="➕ Add to Group",
-            url=f"https://t.me/{bot_username}?startgroup=true",
+            url=f"https://t.me/{bot_username}?startgroup&admin={ADMIN_PERMS}",
         )
         builder.button(
             text="➕ Add to Channel",
-            url=f"https://t.me/{bot_username}?startchannel=true",
+            url=f"https://t.me/{bot_username}?startchannel&admin={ADMIN_PERMS}",
         )
 
     # Row 2: secondary actions

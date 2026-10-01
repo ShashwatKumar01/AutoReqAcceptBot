@@ -24,7 +24,7 @@ class ApprovalWorker:
         self.poll_interval = poll_interval
         self.running = False
         self.logger = get_logger("approval_worker")
-        self._last_cleanup_day: int = -1
+        self._last_cleanup_date: str = ""
 
     def _utcnow(self) -> datetime:
         return datetime.now(timezone.utc)
@@ -32,6 +32,16 @@ class ApprovalWorker:
     async def start(self) -> None:
         self.running = True
         self.logger.info("APPROVAL_WORKER_STARTED", poll_interval=self.poll_interval)
+
+        # Check on worker startup
+        if self.cleanup_service:
+            try:
+                now = self._utcnow()
+                if now.hour >= 2:
+                    await self._run_cleanup_safe(now)
+            except Exception as e:
+                self.logger.error("APPROVAL_WORKER_STARTUP_CLEANUP_FAILED", error=str(e), exc_info=True)
+
         while self.running:
             try:
                 now = self._utcnow()
@@ -46,19 +56,21 @@ class ApprovalWorker:
                 self.logger.error("APPROVAL_WORKER_ERROR", error=str(e), exc_info=True)
             await asyncio.sleep(self.poll_interval)
 
+    async def _run_cleanup_safe(self, now: datetime) -> None:
+        self._last_cleanup_date = now.strftime("%Y-%m-%d")
+        self.logger.info("DAILY_CLEANUP_START", date=self._last_cleanup_date)
+        try:
+            stats = await self.cleanup_service.run_daily_cleanup()
+            self.logger.info("DAILY_CLEANUP_DONE", stats=stats)
+        except Exception as e:
+            self.logger.error("DAILY_CLEANUP_FAILED", error=str(e), exc_info=True)
+
     async def _maybe_run_daily_cleanup(self, now: datetime) -> None:
         if not self.cleanup_service:
             return
-        if now.hour == 2 and now.minute < 5:
-            today = now.date().toordinal()
-            if today != self._last_cleanup_day:
-                self._last_cleanup_day = today
-                self.logger.info("DAILY_CLEANUP_START")
-                try:
-                    stats = await self.cleanup_service.run_daily_cleanup()
-                    self.logger.info("DAILY_CLEANUP_DONE", stats=stats)
-                except Exception as e:
-                    self.logger.error("DAILY_CLEANUP_FAILED", error=str(e), exc_info=True)
+        today_str = now.strftime("%Y-%m-%d")
+        if now.hour >= 2 and self._last_cleanup_date != today_str:
+            await self._run_cleanup_safe(now)
 
     async def stop(self) -> None:
         self.running = False

@@ -32,25 +32,35 @@ class CleanupService:
         self,
         db,
         bot: Optional[Bot] = None,
-        super_admin_chat_id: Optional[int] = None,
+        super_admin_chat_ids: list[int] | int | None = None,
         approved_retention_hours: int = 24,
         failed_retention_hours: int = 72,
     ):
         self.db = db
         self.bot = bot
-        self.super_admin_chat_id = super_admin_chat_id
+        if isinstance(super_admin_chat_ids, int):
+            self.super_admin_chat_ids = [super_admin_chat_ids]
+        elif isinstance(super_admin_chat_ids, list):
+            self.super_admin_chat_ids = [int(x) for x in super_admin_chat_ids if str(x).lstrip('-').isdigit()]
+        else:
+            self.super_admin_chat_ids = []
         self.approved_retention = timedelta(hours=approved_retention_hours)
         self.failed_retention = timedelta(hours=failed_retention_hours)
         self.stale_retention = timedelta(days=self.STALE_PENDING_DAYS)
         self.logger = get_logger("cleanup_service")
 
-    async def run_daily_cleanup(self) -> dict:
+    async def run_daily_cleanup(
+        self,
+        purge_non_dm_users: bool = False,
+        super_admin_ids: list[int] | None = None,
+    ) -> dict:
         """Delete processed and stale join_requests past their retention window."""
         now = datetime.now(timezone.utc)
         stats = {
             "approved_deleted": 0,
             "failed_deleted": 0,
             "stale_deleted": 0,   # pending/scheduled that died silently
+            "users_purged": 0,
             "errors": [],
         }
         col = self.db["join_requests"]
@@ -114,7 +124,7 @@ class CleanupService:
         # 5. Delete users who never started the bot in DM (except superadmins)
         if purge_non_dm_users:
             try:
-                admin_ids = super_admin_ids or []
+                admin_ids = super_admin_ids or self.super_admin_chat_ids or []
                 r = await self.db["users"].delete_many({
                     "private_chat_started": {"$ne": True},
                     "telegram_id": {"$nin": admin_ids},
@@ -132,37 +142,39 @@ class CleanupService:
         )
         self.logger.info("Daily cleanup complete", total_deleted=total, stats=stats)
 
-        # Send report to super-admin (always send, even if 0, so admin knows it ran)
-        if self.bot and self.super_admin_chat_id:
-            try:
-                err_note = (
-                    f"\n⚠️ Errors: {', '.join(stats['errors'][:2])}"
-                    if stats["errors"] else ""
-                )
-                stale_line = (
-                    f"⏳ Stale pending/scheduled: <b>{stats['stale_deleted']}</b>\n"
-                    if stats["stale_deleted"] else ""
-                )
-                users_line = (
-                    f"👥 Non-DM users purged: <b>{stats['users_purged']}</b>\n"
-                    if stats.get("users_purged") else ""
-                )
-                await self.bot.send_message(
-                    chat_id=self.super_admin_chat_id,
-                    text=(
-                        f"🗑 <b>DB Cleanup Report</b>\n\n"
-                        f"✅ Approved (done): <b>{stats['approved_deleted']}</b>\n"
-                        f"❌ Failed (old): <b>{stats['failed_deleted']}</b>\n"
-                        f"{stale_line}"
-                        f"{users_line}"
-                        f"📦 Total removed: <b>{total}</b>"
-                        f"{err_note}\n"
-                        f"⏰ {now.strftime('%Y-%m-%d %H:%M UTC')}"
-                    ),
-                    parse_mode="HTML",
-                )
-            except Exception as e:
-                self.logger.warning("Cleanup report send failed", error=str(e))
+        # Send report to all super-admins (always send, even if 0, so admin knows it ran)
+        if self.bot and self.super_admin_chat_ids:
+            err_note = (
+                f"\n⚠️ Errors: {', '.join(stats['errors'][:2])}"
+                if stats["errors"] else ""
+            )
+            stale_line = (
+                f"⏳ Stale pending/scheduled: <b>{stats['stale_deleted']}</b>\n"
+                if stats["stale_deleted"] else ""
+            )
+            users_line = (
+                f"👥 Non-DM users purged: <b>{stats['users_purged']}</b>\n"
+                if stats.get("users_purged") else ""
+            )
+            report_msg = (
+                f"🗑 <b>DB Cleanup Report</b>\n\n"
+                f"✅ Approved (done): <b>{stats['approved_deleted']}</b>\n"
+                f"❌ Failed (old): <b>{stats['failed_deleted']}</b>\n"
+                f"{stale_line}"
+                f"{users_line}"
+                f"📦 Total removed: <b>{total}</b>"
+                f"{err_note}\n"
+                f"⏰ {now.strftime('%Y-%m-%d %H:%M UTC')}"
+            )
+            for admin_chat_id in self.super_admin_chat_ids:
+                try:
+                    await self.bot.send_message(
+                        chat_id=admin_chat_id,
+                        text=report_msg,
+                        parse_mode="HTML",
+                    )
+                except Exception as e:
+                    self.logger.warning("Cleanup report send failed", admin_id=admin_chat_id, error=str(e))
 
         return stats
 

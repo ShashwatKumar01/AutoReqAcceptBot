@@ -67,11 +67,10 @@ async def main():
         redis_client=redis_client,
     )
 
-    _cleanup_admin_id = settings.super_admin_id_list[0] if getattr(settings, 'super_admin_id_list', []) else None
     cleanup_service = CleanupService(
         db=db,
         bot=bot,
-        super_admin_chat_id=_cleanup_admin_id,
+        super_admin_chat_ids=settings.super_admin_id_list,
         approved_retention_hours=24,
         failed_retention_hours=72,
     )

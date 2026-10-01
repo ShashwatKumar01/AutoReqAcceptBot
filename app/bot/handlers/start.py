@@ -27,11 +27,17 @@ _SUPER_ADMIN_START = (
 )
 
 
+ADMIN_PERMS = (
+    "post_messages+edit_messages+promote_members+delete_messages+"
+    "restrict_members+invite_users+pin_messages+manage_video_chats+change_info"
+)
+
+
 def _start_keyboard(has_chats: bool, bot_username: str, is_super_admin: bool):
     """
     /start output keyboard.
 
-    - Always primary: Add to Group / Add to Channel (deep-links).
+    - Always primary: Add to Group / Add to Channel (deep-links with all admin rights).
     - If the user already has chats connected, also show a single
       "📋 Open Menu" button that opens the full main menu.
     - Super admin: also show "👑 Admin Panel" button.
@@ -40,11 +46,11 @@ def _start_keyboard(has_chats: bool, bot_username: str, is_super_admin: bool):
     if bot_username:
         builder.button(
             text="➕ Add to Group",
-            url=f"https://t.me/{bot_username}?startgroup=true",
+            url=f"https://t.me/{bot_username}?startgroup&admin={ADMIN_PERMS}",
         )
         builder.button(
             text="➕ Add to Channel",
-            url=f"https://t.me/{bot_username}?startchannel=true",
+            url=f"https://t.me/{bot_username}?startchannel&admin={ADMIN_PERMS}",
         )
     if has_chats:
         builder.button(
@@ -147,25 +153,42 @@ async def start_handler(
     chats = await chat_repo.get_by_admin(user_id)
     has_chats = bool(chats)
 
+    group_url = f"https://t.me/{bot_username}?startgroup&admin={ADMIN_PERMS}" if bot_username else ""
+    channel_url = f"https://t.me/{bot_username}?startchannel&admin={ADMIN_PERMS}" if bot_username else ""
+
     if not has_chats:
+        links_block = ""
+        if bot_username:
+            links_block = (
+                f"\n\n👉 <a href=\"{group_url}\"><b>➕ Add to Group (All Rights Enabled)</b></a>\n"
+                f"👉 <a href=\"{channel_url}\"><b>➕ Add to Channel (All Rights Enabled)</b></a>"
+            )
         text = (
             "👋 <b>Welcome to Auto Request Manager!</b>\n\n"
             "I automatically <b>approve join requests</b> for your groups and channels "
             "and can <b>DM welcome messages</b> (text, media, buttons).\n\n"
             "<b>To get started, add me as admin:</b>"
+            f"{links_block}"
             f"{_START_HINT}"
         )
     else:
+        links_block = ""
+        if bot_username:
+            links_block = (
+                f"\n\n👉 <a href=\"{group_url}\"><b>➕ Add to Group</b></a> • "
+                f"<a href=\"{channel_url}\"><b>➕ Add to Channel</b></a>"
+            )
         text = (
             f"👋 You're connected to <b>{len(chats)}</b> chat(s).\n"
             "Add another or open the menu to configure."
+            f"{links_block}"
             f"{_START_HINT}"
         )
     if is_super_admin:
         text += _SUPER_ADMIN_START
         url = get_settings().admin_web_url
         text += f"\n🌐 Web: <code>{url}</code>"
-    await message.answer(text, reply_markup=_start_keyboard(has_chats, bot_username, is_super_admin))
+    await message.answer(text, reply_markup=_start_keyboard(has_chats, bot_username, is_super_admin), disable_web_page_preview=True)
 
 
 @router.callback_query(F.data.startswith("wel:unlock:"))
