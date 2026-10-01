@@ -153,35 +153,18 @@ async def start_handler(
     chats = await chat_repo.get_by_admin(user_id)
     has_chats = bool(chats)
 
-    group_url = f"https://t.me/{bot_username}?startgroup&admin={ADMIN_PERMS}" if bot_username else ""
-    channel_url = f"https://t.me/{bot_username}?startchannel&admin={ADMIN_PERMS}" if bot_username else ""
-
     if not has_chats:
-        links_block = ""
-        if bot_username:
-            links_block = (
-                f"\n\n👉 <a href=\"{group_url}\"><b>➕ Add to Group (All Rights Enabled)</b></a>\n"
-                f"👉 <a href=\"{channel_url}\"><b>➕ Add to Channel (All Rights Enabled)</b></a>"
-            )
         text = (
             "👋 <b>Welcome to Auto Request Manager!</b>\n\n"
             "I automatically <b>approve join requests</b> for your groups and channels "
             "and can <b>DM welcome messages</b> (text, media, buttons).\n\n"
             "<b>To get started, add me as admin:</b>"
-            f"{links_block}"
             f"{_START_HINT}"
         )
     else:
-        links_block = ""
-        if bot_username:
-            links_block = (
-                f"\n\n👉 <a href=\"{group_url}\"><b>➕ Add to Group</b></a> • "
-                f"<a href=\"{channel_url}\"><b>➕ Add to Channel</b></a>"
-            )
         text = (
             f"👋 You're connected to <b>{len(chats)}</b> chat(s).\n"
             "Add another or open the menu to configure."
-            f"{links_block}"
             f"{_START_HINT}"
         )
     if is_super_admin:
