@@ -4,8 +4,7 @@
 ### High-Performance Join Request Auto-Accept, Welcome DM & Community Growth Bot for Telegram
 
 [![Telegram Bot](https://img.shields.io/badge/Telegram_Bot-@RequestApproverAuto__bot-blue?style=for-the-badge&logo=telegram)](https://t.me/RequestApproverAuto_bot)
-[![Updates Channel](https://img.shields.io/badge/Updates_Channel-@AutoForwarderUpdates-0088cc?style=for-the-badge&logo=telegram)](https://t.me/AutoForwarderUpdates)
-[![24/7 Support](https://img.shields.io/badge/Support-@woxic__01-26A5E4?style=for-the-badge&logo=telegram)](https://t.me/woxic_01)
+[![Updates Channel](https://img.shields.io/badge/Updates_Channel-@BotsXP-0088cc?style=for-the-badge&logo=telegram)](https://t.me/BotsXP)
 
 <br/>
 
@@ -19,7 +18,7 @@
   <b>Never lose a subscriber again! Automatically approve Telegram channel & group join requests instantly, send personalized DM welcome messages with buttons, and broadcast to your audience with ease.</b>
 </p>
 
-[🚀 Add Bot to Channel](https://t.me/RequestApproverAuto_bot) • [📢 Join Updates Channel](https://t.me/AutoForwarderUpdates) • [💬 Contact Support](https://t.me/woxic_01)
+[🚀 Add Bot to Channel](https://t.me/RequestApproverAuto_bot) • [📢 Join Updates Channel](https://t.me/BotsXP)
 
 ---
 
@@ -135,7 +134,7 @@ Telegram Channels and Supergroups using **Join Request links** frequently accumu
 
 - 🤖 **Official Bot**: [@RequestApproverAuto_bot](https://t.me/RequestApproverAuto_bot)
 - 📢 **Official Updates Channel**: [@BotsXP](https://t.me/BotsXP)
-- 💬 **24/7 Support**: [@woxic_01](https://t.me/woxic_01)
+
 
 ---
 
