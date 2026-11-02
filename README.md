@@ -134,7 +134,7 @@ Telegram Channels and Supergroups using **Join Request links** frequently accumu
 ## 📢 Stay Connected & Support
 
 - 🤖 **Official Bot**: [@RequestApproverAuto_bot](https://t.me/RequestApproverAuto_bot)
-- 📢 **Official Updates Channel**: [@AutoForwarderUpdates](https://t.me/AutoForwarderUpdates)
+- 📢 **Official Updates Channel**: [@BotsXP](https://t.me/BotsXP)
 - 💬 **24/7 Support**: [@woxic_01](https://t.me/woxic_01)
 
 ---
