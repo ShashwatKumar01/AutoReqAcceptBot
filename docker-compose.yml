@@ -32,9 +32,7 @@ services:
       - mongodb
       - redis
     ports:
-      - "8000:8000"
-      - "8080:8080"
-      - "9090:9090"
+      - "8005:8000"
     networks:
       - botnet
 
